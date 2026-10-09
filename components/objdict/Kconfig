@@ -1,0 +1,11 @@
+menu "Object Dictionary"
+
+    config OD_MAX_OBJECTS
+        int "Maximum number of dynamic objects"
+        range 4 255
+        default 32
+        help
+            Size of the table of objects registered by the gateway (X13: OD_MAX_INDEX_LIST).
+            Reducing the value drops the saved object list.
+
+endmenu

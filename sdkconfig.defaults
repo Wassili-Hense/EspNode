@@ -1,0 +1,7 @@
+CONFIG_IDF_TARGET="esp32"
+
+# 1 ms scheduler tick: the node loop runs a 10 ms poll cycle
+CONFIG_FREERTOS_HZ=1000
+
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y

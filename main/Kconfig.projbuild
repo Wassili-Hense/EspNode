@@ -1,0 +1,47 @@
+menu "EspNode"
+
+    menu "MQTT-SN serial link"
+
+        config ESPNODE_UART_PORT
+            int "UART port"
+            range 1 2
+            default 1
+            help
+                UART0 stays the console.
+
+        config ESPNODE_UART_TX_PIN
+            int "TX GPIO"
+            range 0 33
+            default 17
+            help
+                On WROVER modules GPIO16/17 are used by PSRAM, choose other pins.
+
+        config ESPNODE_UART_RX_PIN
+            int "RX GPIO"
+            range 0 39
+            default 16
+
+        config ESPNODE_UART_DE_PIN
+            int "RS485 DE GPIO (-1 = plain UART)"
+            range -1 33
+            default -1
+            help
+                Driver enable of an RS485 transceiver (half duplex), DE and /RE tied together.
+
+        config ESPNODE_UART_BAUD
+            int "Baud rate"
+            default 38400
+
+    endmenu
+
+    config ESPNODE_DEVICE_TYPE
+        string "Device type"
+        default "E1S10"
+        help
+            X13 declarer: uC family (E - ESP32), subtype, PHY1 (S - serial), HW version.
+
+    config ESPNODE_SW_VERSION
+        string "Software version"
+        default "400"
+
+endmenu
