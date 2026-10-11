@@ -1,0 +1,47 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default (development)",
+      "description": "Development configuration",
+      "binaryDir": "${sourceDir}/build/default",
+      "cacheVariables": {
+        "SDKCONFIG": "${sourceDir}/build/default/sdkconfig",
+        "IDF_TARGET": "esp32"
+      },
+      "vendor": {
+        "espressif/vscode-esp-idf": {
+          "schemaVersion": 1,
+          "settings": [
+            {
+              "type": "openOCD",
+              "value": {
+                "debugLevel": 2,
+                "configs": [
+                  "interface/ftdi/esp_ftdi.cfg",
+                  "target/esp32.cfg"
+                ],
+                "args": []
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "production",
+      "displayName": "Production",
+      "description": "Production configuration",
+      "binaryDir": "${sourceDir}/build/production",
+      "cacheVariables": {
+        "SDKCONFIG": "${sourceDir}/build/production/sdkconfig"
+      }
+    }
+  ]
+}

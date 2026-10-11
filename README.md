@@ -26,12 +26,13 @@
 ESP-IDF ≥ 5.3 (проверено на v6.1), target `esp32`, flash ≥ 2 МБ.
 
 ```
-idf.py build
-idf.py -p COM3 flash monitor
+idf.py -B build/default build
+idf.py -B build/default -p COM3 flash monitor
 ```
 
-Если в проекте есть `CMakePresets.json` (его создаёт расширение ESP-IDF для VS Code), из командной
-строки собирайте с `-B build/default`: `idf.py` v6.1 не раскрывает `${sourceDir}` в пресете.
+`-B build/default` обязателен: в проекте лежит `CMakePresets.json` (по нему собирает расширение ESP-IDF
+для VS Code), а `idf.py` v6.1 не раскрывает `${sourceDir}` в его пути и без ключа создаёт каталог
+с буквальным именем `${sourceDir}`. Из VS Code собирается без ключа.
 
 Таблица разделов своя (`partitions.csv`, раздел `plc` для программы PLC): при переходе с прошивки
 без PLC нужна полная прошивка (`idf.py flash`), настройки в NVS сохраняются.
@@ -57,9 +58,9 @@ python tools/gw_sim.py COM5          # USB-UART адаптер на GPIO17/16
 
 Программы для ручной проверки на устройстве — [tests/plc](tests/plc/README.md).
 
-## История
+## План и история
 
-[changelog.md](changelog.md) — что и почему менялось.
+[TODO.md](TODO.md) — что предстоит, [changelog.md](changelog.md) — что и почему менялось.
 
 ## Лицензия
 
