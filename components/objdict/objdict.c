@@ -108,8 +108,19 @@ static uint8_t read_device_type(const od_subidx_t *sidx, uint8_t *len, uint8_t *
     return MQTTSN_RC_ACCEPTED;
 }
 
+// X13 PLC nodes disable polling of inputs used by the PLC program. Inputs are
+// owned by the PLC here, there is nothing to mute.
+static uint8_t write_in_mute(const od_subidx_t *sidx, uint8_t len, const uint8_t *buf)
+{
+    (void)sidx;
+    (void)len;
+    (void)buf;
+    return MQTTSN_RC_ACCEPTED;
+}
+
 static const od_entry_t s_predef[] = {
     { { OD_PLACE_EEMEM,   OD_TYPE_STRING, 0 }, OD_ID_NODE_NAME,   read_node_name,   write_node_name, NULL },
+    { { OD_PLACE_EEMEM,   OD_TYPE_ARRAY,  0 }, OD_ID_IN_MUTE,     NULL,             write_in_mute,   NULL },
     { { OD_PLACE_EEMEM,   OD_TYPE_UINT8,  0 }, OD_ID_NODE_ID,     read_node_id,     write_node_id,   NULL },
     { { OD_PLACE_EEMEM,   OD_TYPE_UINT8,  0 }, OD_ID_GATE_ID,     read_gate_id,     write_gate_id,   NULL },
     { { OD_PLACE_PROGMEM, OD_TYPE_STRING, 0 }, OD_ID_DEVICE_TYPE, read_device_type, NULL,            NULL },
@@ -251,6 +262,11 @@ static void session_step(void)
                 s.idx++;
             } else {
                 s.idx = SESSION_DONE;
+                for (size_t i = 0; i < s.n_providers; i++) {
+                    if (s.providers[i]->on_session != NULL) {
+                        s.providers[i]->on_session();
+                    }
+                }
             }
         }
     } else if (mqttsn_client_can_send()) {
@@ -307,25 +323,52 @@ esp_err_t od_init(const od_config_t *cfg)
         }
     }
 
-    // Restore saved objects, topic ids are assigned in the next session
+    // Restore saved objects into slots left by the providers, topic ids are assigned
+    // in the next session
     size_t n;
     const od_subidx_t *saved = od_storage_list(&n);
+    size_t restored = 0;
     size_t pos = 0;
-    for (size_t i = 0; (i < n) && (pos < OD_MAX); i++) {
+    for (size_t i = 0; i < n; i++) {
         if (od_storage_slot_free(&saved[i])) {
             continue;
         }
+        while ((pos < OD_MAX) && (s.list[pos].topic_id != OD_TOPIC_FREE)) {
+            pos++;
+        }
+        if (pos == OD_MAX) {
+            ESP_LOGW(TAG, "object table full");
+            break;
+        }
+
         s.list[pos].sidx = saved[i];
         if (attach_entry(&s.list[pos]) != MQTTSN_RC_ACCEPTED) {
             ESP_LOGW(TAG, "saved object %c%c%u not supported", saved[i].place, saved[i].type,
                      (unsigned)saved[i].base);
             continue;
         }
-        s.list[pos++].topic_id = OD_TOPIC_NEW;
+        s.list[pos].topic_id = OD_TOPIC_NEW;
+        restored++;
     }
 
-    ESP_LOGI(TAG, "device %s, %u objects restored", s.device_type, (unsigned)pos);
+    ESP_LOGI(TAG, "device %s, %u objects restored", s.device_type, (unsigned)restored);
     return ESP_OK;
+}
+
+od_entry_t *od_add_object(const od_subidx_t *sidx)
+{
+    for (size_t i = 0; i < OD_MAX; i++) {
+        od_entry_t *entry = &s.list[i];
+        if (entry->topic_id == OD_TOPIC_FREE) {
+            entry->sidx = *sidx;
+            entry->topic_id = OD_TOPIC_NEW;
+            entry->read = NULL;
+            entry->write = NULL;
+            entry->poll = NULL;
+            return entry;
+        }
+    }
+    return NULL;
 }
 
 void od_poll(void)

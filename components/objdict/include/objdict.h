@@ -44,12 +44,14 @@ extern "C" {
 #define OD_TYPE_INT32           'd'
 #define OD_TYPE_UINT32          'D'
 #define OD_TYPE_INT64           'q'
+#define OD_TYPE_FLOAT           'f'     // IEEE-754, 4 bytes
 #define OD_TYPE_STRING          's'     // UTF-8 string
 #define OD_TYPE_ARRAY           'a'
 #define OD_TYPE_PWM_FREQ        'g'     // PWM frequency
 
 // Predefined objects (MQTTSN_FL_TOPICID_PREDEF)
 #define OD_ID_NODE_NAME         0xFF00  // String, ClientId
+#define OD_ID_IN_MUTE           0xFF09  // Array, write only, sent by the gateway to PLC nodes
 #define OD_ID_NODE_ID           0xFF10  // UInt8, own address, 0xFF - DHCP
 #define OD_ID_GATE_ID           0xFF14  // UInt8, gateway address, 0xFF - search
 #define OD_ID_DEVICE_TYPE       0xFFC0  // String, read only
@@ -83,7 +85,7 @@ typedef struct {
     od_poll_t   poll;
 } od_entry_t;
 
-// Extension providing the objects of one place (DIO, AIN, PLC, ...)
+// Extension providing the objects of one place (e.g. PLC merkers)
 typedef struct {
     uint8_t place;
     bool    (*check)(const od_subidx_t *sidx);  // Valid and not in use
@@ -91,6 +93,7 @@ typedef struct {
     void    (*detach)(const od_subidx_t *sidx); // Optional
     void    (*init)(void);                      // Optional, called from od_init()
     void    (*proc)(void);                      // Optional, called from od_poll()
+    void    (*on_session)(void);                // Optional, device info published (PRE_CONNECT)
 } od_provider_t;
 
 typedef struct {
@@ -101,6 +104,11 @@ typedef struct {
 
 // Requires nvs_flash_init()
 esp_err_t od_init(const od_config_t *cfg);
+
+// Add an object owned by the node (X13: PnP object), the node registers it with the gateway.
+// Not saved, call it from od_provider_t.init(). Returns NULL if the table is full,
+// otherwise the entry to set callbacks in.
+od_entry_t *od_add_object(const od_subidx_t *sidx);
 
 // Call every 10 ms, before mqttsn_client_tick()
 void od_poll(void);

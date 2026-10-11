@@ -14,6 +14,7 @@
 
 #include "mqttsn_client.h"
 #include "objdict.h"
+#include "plc.h"
 #include "serial_phy.h"
 
 static const char *TAG = "espnode";
@@ -110,10 +111,14 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
-    static const od_config_t od_cfg = {
+    ESP_ERROR_CHECK(plc_init());
+
+    static const od_provider_t *providers[1];
+    providers[0] = plc_provider();
+    const od_config_t od_cfg = {
         .device_type    = CONFIG_ESPNODE_DEVICE_TYPE "." CONFIG_ESPNODE_SW_VERSION,
-        .providers      = NULL,
-        .n_providers    = 0,
+        .providers      = providers,
+        .n_providers    = 1,
     };
     ESP_ERROR_CHECK(od_init(&od_cfg));
 

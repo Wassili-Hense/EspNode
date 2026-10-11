@@ -1,0 +1,25 @@
+menu "PLC"
+
+    config PLC_PROGRAM_SIZE
+        int "Program memory, bytes"
+        range 4096 65536
+        default 16384
+        help
+            Multiple of 4096. The "plc" partition must be at least this large.
+
+    config PLC_RAM_WORDS
+        int "Data memory, 32-bit words"
+        range 256 2048
+        default 1024
+        help
+            Global variables, merkers and the stack of the PLC program.
+
+    config PLC_RW_WORDS
+        int "Merker area, 32-bit words"
+        range 16 2048
+        default 256
+        help
+            Start of the data memory the gateway can read and write as merkers (M objects).
+            Must not exceed PLC_RAM_WORDS.
+
+endmenu

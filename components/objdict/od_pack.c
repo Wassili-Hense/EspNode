@@ -28,6 +28,7 @@ uint8_t od_pack_width(const od_subidx_t *sidx)
     case OD_TYPE_INT32:     return OD_PACK_SIGNED | 4;
     case OD_TYPE_UINT32:    return 4;
     case OD_TYPE_INT64:     return OD_PACK_SIGNED | 8;
+    case OD_TYPE_FLOAT:     return 0;   // Always 4 bytes, not packed
     default:                return 0;
     }
 }

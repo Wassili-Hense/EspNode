@@ -45,6 +45,12 @@ FL_TOPICID_NORM, FL_TOPICID_PREDEF = 0x00, 0x01
 
 RC_NAMES = {0: 'accepted', 1: 'congestion', 2: 'invalid topic id', 3: 'not supported'}
 
+# PLC control object "pa0": request [cmd] [args], response [cmd + 1] [status] [data]
+PLC_TOPIC = 'pa0'
+PLC_CMDS = {0: 'IDLE', 1: 'START_REQ', 2: 'START_RESP', 3: 'STOP_REQ', 4: 'STOP_RESP',
+            5: 'CRC_REQ', 6: 'CRC_RESP', 7: 'WRITE_REQ', 8: 'WRITE_RESP',
+            11: 'SET_STACK_REQ', 12: 'SET_STACK_RESP'}
+
 # Predefined objects of the node, decoded as strings
 PREDEF_STRINGS = {0xFF00: 'NodeName', 0xFFC0: 'DeviceType'}
 PREDEF_NAMES = {0xFF10: 'NodeId', 0xFF14: 'GateId', 0xFFC1: 'PHY1addr', **PREDEF_STRINGS}
@@ -194,6 +200,8 @@ class Gateway:
             name = self.topics.get(topic_id, '')
             self.log(f'    {topic_label(topic_id, flags)} {name} QoS{(flags & FL_QOS_MASK) >> 5}'
                      f'{retain}{dup}: {describe_value(topic_id, flags, data)}')
+            if name == PLC_TOPIC and len(data) >= 2:
+                self.log(f'    PLC {PLC_CMDS.get(data[0], hex(data[0]))}, status 0x{data[1]:02X}')
             if (flags & FL_QOS_MASK) == FL_QOS1:
                 self._send(msg(PUBACK, p16(topic_id) + p16(msg_id) + b'\x00'))
         elif t == SUBSCRIBE:
@@ -219,11 +227,20 @@ class Gateway:
     def disconnect(self) -> None:
         self._send(msg(DISCONNECT))
 
+    def plc(self, data: bytes) -> None:
+        tid = next((t for t, n in self.topics.items() if n == PLC_TOPIC), None)
+        if tid is None:
+            raise ValueError(f'node has not registered "{PLC_TOPIC}" yet')
+        self.publish(tid, data)
+
 
 HELP = """commands:
   name <text>                  set node name (PUBLISH to 0xFF00)
   pub <topic> <hex> [predef]   publish raw data, topic is decimal or 0x..
-  reg <topic> <name>           register object, e.g. "reg 5 Oz12"
+  reg <topic> <name>           register object, e.g. "reg 50 Md0" (PLC merker)
+  plc start|stop               start/stop the PLC program
+  plc crc <addr> <len>         CRC of the program memory
+  plc raw <hex>                raw PLC control request
   disconnect                   send DISCONNECT
   quit"""
 
@@ -242,6 +259,14 @@ def run_command(gw: Gateway, line: str) -> bool:
             gw.publish(int(args[0], 0), bytes.fromhex(args[1]), predef='predef' in args[2:])
         elif cmd == 'reg' and len(args) == 2:
             gw.register(int(args[0], 0), args[1])
+        elif cmd == 'plc' and args[:1] == ['start']:
+            gw.plc(b'\x01')
+        elif cmd == 'plc' and args[:1] == ['stop']:
+            gw.plc(b'\x03')
+        elif cmd == 'plc' and args[:1] == ['crc'] and len(args) == 3:
+            gw.plc(bytes([5]) + int(args[1], 0).to_bytes(2, 'little') + int(args[2], 0).to_bytes(2, 'little'))
+        elif cmd == 'plc' and args[:1] == ['raw'] and len(args) == 2:
+            gw.plc(bytes.fromhex(args[1]))
         elif cmd == 'disconnect':
             gw.disconnect()
         else:
@@ -326,6 +351,14 @@ def selftest() -> None:
     assert sent[-1] == msg(SUBACK, bytes([0x20]) + p16(0) + p16(9) + b'\x00') and gw.subscribed
     gw.handle(msg(PINGREQ))
     assert sent[-1] == bytes([2, PINGRESP])
+
+    # PLC control object registered by the node
+    gw.handle(msg(REGISTER, p16(0) + p16(10) + b'pa0'))
+    tid = u16(sent[-1], 2)
+    run_command(gw, 'plc start')
+    assert sent[-1][1] == PUBLISH and u16(sent[-1], 3) == tid and sent[-1][7:] == b'\x01'
+    run_command(gw, 'plc crc 0 0x100')
+    assert sent[-1][7:] == bytes([5, 0, 0, 0, 1])
 
     print('selftest passed')
 
