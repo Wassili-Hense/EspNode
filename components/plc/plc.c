@@ -14,6 +14,7 @@
 #include "mqttsn_defs.h"
 #include "plc.h"
 #include "plc_api.h"
+#include "plc_io.h"
 #include "plc_store.h"
 #include "plc_vm.h"
 
@@ -47,6 +48,7 @@ static struct {
     bool            busy;               // Exchange buffer holds a request or a response
     bool            answer;             // Response ready to publish
     bool            dirty;              // Program changed since saved
+    bool            io_sweep;           // Release the pins of the previous run after the init cycle
     plc_status_t    error;              // Stop error to report
     plc_vm_regs_t   regs;               // VM registers at the error
     uint8_t         xlen;
@@ -109,6 +111,10 @@ static uint8_t start(void)
             status = PLC_ERR_STORAGE;   // Runs from RAM anyway
         }
     }
+
+    // Pins set up again the same way keep running, outputs don't glitch
+    plc_io_restart_begin();
+    s.io_sweep = true;
 
     plc_vm_restart();
     s.run = true;
@@ -391,6 +397,10 @@ static void provider_proc(void)
 {
     if (s.run) {
         plc_status_t stat = plc_vm_cycle();
+        if ((stat == PLC_OK) && s.io_sweep) {
+            plc_io_restart_end();
+            s.io_sweep = false;
+        }
         if (stat != PLC_OK) {
             s.run = false;
             s.error = stat;
@@ -437,9 +447,15 @@ static const od_provider_t s_provider = {
     .on_session = provider_session,
 };
 
-esp_err_t plc_init(void)
+esp_err_t plc_init(const plc_config_t *cfg)
 {
     memset(&s, 0, sizeof(s));
+
+    const plc_io_config_t io_cfg = {
+        .reserved_pins  = cfg->reserved_pins,
+        .reserved_uarts = cfg->reserved_uarts,
+    };
+    plc_io_init(&io_cfg);
 
     uint32_t stack_bottom = 0;
     if (plc_store_load(s.prg, PRG_SIZE, &stack_bottom) != ESP_OK) {
@@ -455,6 +471,8 @@ esp_err_t plc_init(void)
         .ram        = s.ram,
         .ram_words  = RAM_WORDS,
         .api        = plc_api_call,
+        .io_in      = plc_api_in,
+        .io_out     = plc_api_out,
     };
     plc_vm_init(&vm_cfg);
     plc_vm_set_stack_bottom(stack_bottom);

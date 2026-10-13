@@ -10,9 +10,11 @@ SUBSCRIBE, PINGREQ, and lets you send commands to the node from the console.
 from __future__ import annotations
 
 import argparse
+import queue
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 # Framing: [Length] [message, 0xC0/0xDB escaped as 0xDB, b ^ 0x20] [0xC0]
@@ -50,6 +52,22 @@ PLC_TOPIC = 'pa0'
 PLC_CMDS = {0: 'IDLE', 1: 'START_REQ', 2: 'START_RESP', 3: 'STOP_REQ', 4: 'STOP_RESP',
             5: 'CRC_REQ', 6: 'CRC_RESP', 7: 'WRITE_REQ', 8: 'WRITE_RESP',
             11: 'SET_STACK_REQ', 12: 'SET_STACK_RESP'}
+
+PLC_BLOCK = 32              # Program bytes per WRITE_REQ, as Enviriot DevicePLC
+PLC_TIMEOUT = 2.0           # Wait for a PLC response, s
+
+
+def plc_crc16(data: bytes, crc: int = 0xFFFF) -> int:
+    """CRC of the PLC control protocol: X13 plc_calc_crc, polynomial 0x8005, MSB first."""
+    for b in data:
+        for _ in range(8):
+            if ((crc & 0x8000) >> 8) ^ (b & 0x80):
+                crc = ((crc << 1) ^ 0x8005) & 0xFFFF
+            else:
+                crc = (crc << 1) & 0xFFFF
+            b = (b << 1) & 0xFF
+    return crc
+
 
 # Predefined objects of the node, decoded as strings
 PREDEF_STRINGS = {0xFF00: 'NodeName', 0xFFC0: 'DeviceType'}
@@ -156,6 +174,7 @@ class Gateway:
         self.msg_id = 0
         self.client_id: str | None = None
         self.subscribed = False
+        self.plc_rx: queue.Queue[bytes] = queue.Queue()     # PLC responses, filled by handle()
 
     def _send(self, m: bytes) -> None:
         self.log(f'  -> {MSG_NAMES.get(m[1], hex(m[1]))} {m.hex(" ")}')
@@ -202,6 +221,7 @@ class Gateway:
                      f'{retain}{dup}: {describe_value(topic_id, flags, data)}')
             if name == PLC_TOPIC and len(data) >= 2:
                 self.log(f'    PLC {PLC_CMDS.get(data[0], hex(data[0]))}, status 0x{data[1]:02X}')
+                self.plc_rx.put(bytes(data))
             if (flags & FL_QOS_MASK) == FL_QOS1:
                 self._send(msg(PUBACK, p16(topic_id) + p16(msg_id) + b'\x00'))
         elif t == SUBSCRIBE:
@@ -228,10 +248,50 @@ class Gateway:
         self._send(msg(DISCONNECT))
 
     def plc(self, data: bytes) -> None:
-        tid = next((t for t, n in self.topics.items() if n == PLC_TOPIC), None)
-        if tid is None:
+        tids = [t for t, n in self.topics.items() if n == PLC_TOPIC]
+        if not tids:
             raise ValueError(f'node has not registered "{PLC_TOPIC}" yet')
-        self.publish(tid, data)
+        self.publish(tids[-1], data)            # The node registers it again after a reconnect
+
+    def plc_request(self, data: bytes, timeout: float = PLC_TIMEOUT) -> bytes | None:
+        """Send a PLC control request and wait for its response [cmd + 1] [status] ..."""
+        while not self.plc_rx.empty():
+            self.plc_rx.get_nowait()
+        self.plc(data)
+        deadline = time.monotonic() + timeout
+        while (left := deadline - time.monotonic()) > 0:
+            try:
+                resp = self.plc_rx.get(timeout=left)
+            except queue.Empty:
+                break
+            if resp[0] == data[0] + 1:
+                return resp
+        return None
+
+    def plc_upload(self, program: bytes, stack_bottom: int) -> str:
+        """Upload like Enviriot DevicePLC: CRC check, STOP, WRITE blocks, SET_STACK, START."""
+        def request(data: bytes, check: bool = True) -> bytes:
+            name = PLC_CMDS[data[0]]
+            resp = self.plc_request(data)
+            if resp is None:
+                raise ValueError(f'no response to {name}')
+            if check and resp[1] != 0:
+                raise ValueError(f'{name}: status 0x{resp[1]:02X}')
+            return resp
+
+        size = len(program)
+        if not 0 < size <= 0xFFFF:
+            raise ValueError(f'program size {size}')
+        resp = request(bytes([5, 0, 0]) + size.to_bytes(2, 'little'))
+        if resp[2:4] == plc_crc16(program).to_bytes(2, 'little'):
+            return 'program unchanged, not uploaded'
+        request(b'\x03', check=False)           # A pending error report has the same command
+        for offs in range(0, size, PLC_BLOCK):
+            block = program[offs:offs + PLC_BLOCK]
+            request(bytes([7]) + offs.to_bytes(2, 'little') + block + plc_crc16(block).to_bytes(2, 'little'))
+        request(bytes([11]) + stack_bottom.to_bytes(4, 'little'))
+        request(b'\x01')
+        return f'{size} bytes uploaded, stack bottom {stack_bottom}, started'
 
 
 HELP = """commands:
@@ -241,6 +301,8 @@ HELP = """commands:
   plc start|stop               start/stop the PLC program
   plc crc <addr> <len>         CRC of the program memory
   plc raw <hex>                raw PLC control request
+  plc upload <file> [stack]    upload a program image and start it, stack - stack bottom in
+                               words (data below it is protected from the stack), default 0
   disconnect                   send DISCONNECT
   quit"""
 
@@ -267,11 +329,14 @@ def run_command(gw: Gateway, line: str) -> bool:
             gw.plc(bytes([5]) + int(args[1], 0).to_bytes(2, 'little') + int(args[2], 0).to_bytes(2, 'little'))
         elif cmd == 'plc' and args[:1] == ['raw'] and len(args) == 2:
             gw.plc(bytes.fromhex(args[1]))
+        elif cmd == 'plc' and args[:1] == ['upload'] and len(args) in (2, 3):
+            stack = int(args[2], 0) if len(args) == 3 else 0
+            print(gw.plc_upload(Path(args[1]).read_bytes(), stack))
         elif cmd == 'disconnect':
             gw.disconnect()
         else:
             print(HELP)
-    except ValueError as err:
+    except (ValueError, OSError) as err:
         print(f'error: {err}')
     return True
 
@@ -359,6 +424,30 @@ def selftest() -> None:
     assert sent[-1][1] == PUBLISH and u16(sent[-1], 3) == tid and sent[-1][7:] == b'\x01'
     run_command(gw, 'plc crc 0 0x100')
     assert sent[-1][7:] == bytes([5, 0, 0, 0, 1])
+
+    # Upload to a node that answers every PLC request with OK and keeps what was written
+    mem = bytearray(256)
+    reqs: list[int] = []
+
+    def plc_node(m: bytes) -> None:
+        sent.append(m)
+        if m[1] != PUBLISH or u16(m, 3) != tid:
+            return
+        req = m[7:]
+        reqs.append(req[0])
+        resp = bytes([req[0] + 1, 0])
+        if req[0] == 5:
+            resp += plc_crc16(bytes(mem[:req[3] | req[4] << 8])).to_bytes(2, 'little')
+        elif req[0] == 7:
+            addr = req[1] | req[2] << 8
+            mem[addr:addr + len(req) - 5] = req[3:-2]
+        gw.handle(msg(PUBLISH, bytes([0]) + p16(tid) + p16(0) + resp))
+
+    gw.send_raw = plc_node
+    prg = bytes(range(40))
+    assert gw.plc_upload(prg, 4).startswith('40 bytes') and mem[:40] == prg
+    assert reqs == [5, 3, 7, 7, 11, 1], reqs
+    assert gw.plc_upload(prg, 4).startswith('program unchanged')
 
     print('selftest passed')
 

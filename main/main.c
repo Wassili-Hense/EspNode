@@ -23,6 +23,7 @@ static const char *TAG = "espnode";
 #define RX_QUEUE_LEN        8
 #define NODE_TASK_STACK     4096
 #define NODE_TASK_PRIO      5
+#define RESERVED_PINS       (0xFC0ull | (1ull << 1) | (1ull << 3))  // Flash GPIO6-11, console TX/RX
 
 typedef struct {
     uint8_t         len;
@@ -39,6 +40,11 @@ static int64_t now_ms(void)
 static uint16_t rand16(void)
 {
     return (uint16_t)esp_random();
+}
+
+static uint64_t pin_bit(int pin)
+{
+    return (pin >= 0) ? (1ull << pin) : 0;
 }
 
 // Called from the serial RX task, hands the message over to the node task
@@ -111,7 +117,13 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
-    ESP_ERROR_CHECK(plc_init());
+    // Pins and ports the PLC program must not touch
+    const plc_config_t plc_cfg = {
+        .reserved_pins  = RESERVED_PINS | pin_bit(CONFIG_ESPNODE_UART_TX_PIN) |
+                          pin_bit(CONFIG_ESPNODE_UART_RX_PIN) | pin_bit(CONFIG_ESPNODE_UART_DE_PIN),
+        .reserved_uarts = (uint8_t)(1u << CONFIG_ESPNODE_UART_PORT),
+    };
+    ESP_ERROR_CHECK(plc_init(&plc_cfg));
 
     static const od_provider_t *providers[1];
     providers[0] = plc_provider();

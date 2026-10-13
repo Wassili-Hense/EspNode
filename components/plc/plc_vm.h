@@ -44,12 +44,19 @@ typedef enum {
 // returns results with plc_vm_push(). Returns PLC_RUN or an error.
 typedef plc_status_t (*plc_vm_api_t)(uint8_t func);
 
+// IN / OUT opcodes (0xC0 / 0xC1 <operand>): the 4-byte operand as a little-endian word,
+// X13 layout place | type << 8 | base << 16. Return PLC_RUN or an error.
+typedef plc_status_t (*plc_vm_in_t)(uint32_t operand, uint32_t *value);
+typedef plc_status_t (*plc_vm_out_t)(uint32_t operand, uint32_t value);
+
 typedef struct {
     const uint8_t  *prg;            // Program
     uint32_t        prg_size;       // Bytes, max 64K (16-bit addresses)
     uint32_t       *ram;            // Data, merkers and stack
     uint32_t        ram_words;
     plc_vm_api_t    api;
+    plc_vm_in_t     io_in;          // NULL - IN stops with PLC_ERR_UNK_COP
+    plc_vm_out_t    io_out;         // NULL - OUT stops with PLC_ERR_UNK_COP
 } plc_vm_config_t;
 
 // Registers, reported to the gateway when the program stops on an error
@@ -75,6 +82,7 @@ void         plc_vm_regs(plc_vm_regs_t *regs);
 // For API functions
 uint32_t     plc_vm_pop(void);
 void         plc_vm_push(uint32_t val);
+plc_status_t plc_vm_status(void);       // PLC_RUN while the cycle has no error
 
 #ifdef __cplusplus
 }

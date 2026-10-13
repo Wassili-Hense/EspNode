@@ -7,7 +7,7 @@
  *  - shifts by 32 and more give 0 (sign for ASR) as on ARM;
  *  - INT32_MIN / -1 gives INT32_MIN as on ARM;
  *  - CALL at SP = 0 stops with PLC_ERR_OFR_SP (X13 wrote outside of RAM);
- *  - IN/OUT opcodes (X13 IO objects) stop with PLC_ERR_UNK_COP.
+ *  - IN/OUT opcodes go to the io_in/io_out handlers instead of X13 IO objects.
  *
  * Float operations (Enviriot extension, 0x18-0x1F, 0x28-0x37): 32-bit IEEE-754 in a stack cell,
  * operand order as for integers, results follow JavaScript, the source language:
@@ -34,6 +34,8 @@ static struct {
     uint32_t       *ram;
     uint32_t        ram_words;
     plc_vm_api_t    api;
+    plc_vm_in_t     io_in;
+    plc_vm_out_t    io_out;
 
     uint32_t        stack_bot;          // Lowest stack address, data below
     uint32_t        sp;                 // Stack pointer, grows down
@@ -182,6 +184,11 @@ void plc_vm_push(uint32_t val)
     } else {
         s.stat = PLC_ERR_OFR_SP;
     }
+}
+
+plc_status_t plc_vm_status(void)
+{
+    return s.stat;
 }
 
 #define pop     plc_vm_pop
@@ -480,8 +487,50 @@ STM(op_stm_s2_c16, set_u16,  lpm_u16())
 STM(op_stm_s4_c16, set_u32,  lpm_u16())
 
 // 0xC0 - 0xCF
-// X13 IO objects are not supported, IO is done by API functions
-static void op_in_out(void) { s.stat = PLC_ERR_UNK_COP; }
+static void op_in(void)
+{
+    if (s.io_in == NULL) {
+        s.stat = PLC_ERR_UNK_COP;
+        return;
+    }
+    uint32_t operand = lpm_u32();
+    if (s.stat != PLC_RUN) {
+        return;
+    }
+    if (!ROOM) {
+        s.stat = PLC_ERR_OFR_SP;
+        return;
+    }
+
+    uint32_t val = 0;
+    plc_status_t stat = s.io_in(operand, &val);
+    if (stat != PLC_RUN) {
+        s.stat = stat;
+        return;
+    }
+    s.ram[--s.sp] = val;
+}
+
+static void op_out(void)
+{
+    if (s.io_out == NULL) {
+        s.stat = PLC_ERR_UNK_COP;
+        return;
+    }
+    uint32_t operand = lpm_u32();
+    if (s.stat != PLC_RUN) {
+        return;
+    }
+    if (!HAS1) {
+        s.stat = PLC_ERR_OFR_SP;
+        return;
+    }
+
+    plc_status_t stat = s.io_out(operand, s.ram[s.sp++]);
+    if (stat != PLC_RUN) {
+        s.stat = stat;
+    }
+}
 
 static void op_api(void)
 {
@@ -629,7 +678,7 @@ static const op_t s_ops[256] = {
     op_stm_b1_cs16, op_stm_s1_cs16, op_stm_s2_cs16, op_stm_s4_cs16, UNK,            UNK,            UNK,            UNK,
     op_stm_b1_c16,  op_stm_s1_c16,  op_stm_s2_c16,  op_stm_s4_c16,  UNK,            UNK,            UNK,            UNK,
     // 0xC0
-    op_in_out,      op_in_out,      UNK,            UNK,            UNK,            UNK,            op_api,         UNK,
+    op_in,          op_out,         UNK,            UNK,            UNK,            UNK,            op_api,         UNK,
     UNK,            op_lpm_s1,      op_lpm_s2,      op_lpm_s4,      op_lpm_u1,      op_lpm_u2,      UNK,            UNK,
     UNK,            UNK,            UNK,            UNK,            UNK,            UNK,            UNK,            UNK,
     UNK,            UNK,            UNK,            UNK,            UNK,            UNK,            UNK,            UNK,
@@ -650,6 +699,8 @@ void plc_vm_init(const plc_vm_config_t *cfg)
     s.ram = cfg->ram;
     s.ram_words = cfg->ram_words;
     s.api = cfg->api;
+    s.io_in = cfg->io_in;
+    s.io_out = cfg->io_out;
     s.stack_bot = 0;
     s.sp = s.ram_words;
     s.sfp = s.ram_words;

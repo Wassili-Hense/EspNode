@@ -2,13 +2,14 @@
 
 Узел X13 (MQTT-SN) для ESP32 на ESP-IDF — перенос прошивки X13.Home (`dev_320`).
 
-Переносятся транспорты MQTT-SN, Object Dictionary и PLC. Ввод-вывод будет только через функции PLC
-(пока не реализован).
+Переносятся транспорты MQTT-SN, Object Dictionary и PLC. Ввод-вывод настраивает и выполняет программа
+PLC: пины, ШИМ, АЦП, ЦАП, счётчики, шины TWI и UART.
 
 - MQTT-SN поверх UART, совместимый со шлюзом X13/Enviriot (кадр `[len][SLIP-escaped][0xC0]`,
   DHCP-адресация 0x43/0x44, predefined-объекты 0xFFxx).
 - PLC: байткод компилятора Enviriot с float-командами, загрузка через объект `pa0`, переменные —
-  мерке́ры `M…` ([docs/plc-api.md](docs/plc-api.md)).
+  мерке́ры `M…`, ввод-вывод — `ConfigPin` и опкоды `IN`/`OUT` по номеру GPIO
+  ([docs/plc-api.md](docs/plc-api.md)). Что нужно в Enviriot — [docs/enviriot-todo.md](docs/enviriot-todo.md).
 
 ## Структура
 
@@ -17,9 +18,10 @@
 | `components/mqttsn` | Протокол: сборка сообщений, state machine клиента (DHCP → SEARCHGW → CONNECT …) |
 | `components/serial_phy` | Транспорт UART/RS485, кодек кадров X13 |
 | `components/objdict` | Object Dictionary: predefined-объекты, регистрация, упаковка значений, NVS |
-| `components/plc` | VM (целые и float), управление программой, мерке́ры, API функции, хранение программы |
+| `components/plc` | VM (целые и float), управление программой, мерке́ры, API функции, ввод-вывод, хранение программы |
 | `main` | Задача узла (тик 10 мс), настройки в `menuconfig → EspNode` |
 | `tools/gw_sim.py` | Симулятор шлюза X13 для проверки без X13 |
+| `test/host` | Хостовые тесты: VM, ввод-вывод, сквозные MQTT-SN и PLC |
 
 ## Сборка
 
@@ -52,11 +54,13 @@ python tools/gw_sim.py COM5          # USB-UART адаптер на GPIO17/16
 
 На чистом узле: DHCPREQ → SEARCHGW → CONNECT `E1S10_10` → REGISTER `pa0` → PUBLISH 0xFFC0
 `E1S10.400`, 0xFFC1 → SUBSCRIBE `#` → состояние PLC. Команды: `name kitchen` — имя узла,
-`plc start|stop|crc`, `reg 50 Md0` — мерке́р.
+`plc start|stop|crc`, `plc upload <файл.bin> [дно стека]` — загрузить программу, `reg 50 Md0` — мерке́р.
 
-## Тесты PLC
+## Тесты
 
-Программы для ручной проверки на устройстве — [tests/plc](tests/plc/README.md).
+- Хостовые, на ПК без ESP-IDF: `python test/host/run.py` ([test/host](test/host/README.md)).
+- Программы PLC для ручной проверки на устройстве с Enviriot — [tests/plc](tests/plc/README.md).
+- Ввод-вывод на плате, образы без компилятора Enviriot — [tests/io](tests/io/README.md).
 
 ## План и история
 
