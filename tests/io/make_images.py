@@ -8,6 +8,7 @@ Scenarios, jumpers and expected values: tests/io/README.md. Numbers: docs/plc-ap
 from pathlib import Path
 
 # Opcodes
+DUP, DROP = 0x02, 0x03
 LDI_0, LDI_U1, LDI_U2, LDI_S4, LDI_1 = 0x38, 0x3C, 0x3D, 0x3B, 0x3E
 AND, ADD, DIV = 0x09, 0x10, 0x13
 CEQ, CGT = 0x20, 0x22
@@ -18,8 +19,9 @@ JZ, JNZ, JMP, RET = 0xF1, 0xF2, 0xF3, 0xFF
 # API functions
 MILLIS, SECONDS = 6, 7
 CONFIG_PIN1, CONFIG_PIN2 = 30, 31
-TWI_XFER = 41
-UART_AVAIL, UART_GET, UART_PUT = 50, 51, 52
+TWI_CONTROL, TWI_STATUS = 1, 2        # Bus 0, as X13
+UART_AVAIL, UART_GET, UART_PUT = 21, 22, 23
+TWI_RDY, TWI_FAILED = 0x10 << 8, 0xE0 << 8     # Status bits: access << 8
 
 # Pin modes
 IN_PU, OUT_ = 2, 5
@@ -116,11 +118,15 @@ def adc_dac():
 
 
 def twi_scan():
-    """Probes one address per cycle, 0x08..0x77, bus 0 on SDA 21 / SCL 22, 100 kHz.
+    """Probes the addresses 0x08..0x77 one by one, bus 0 on SDA 21 / SCL 22, 100 kHz, without waiting:
+    TwiControl(address) starts a probe, the next cycles poll TwiStatus().
     Md0 = last address found, Md2 = devices found by the last full pass, Md1 = address, Md3 = count."""
     init = Asm().call(CONFIG_PIN1, 21, TWI0_SDA).call(CONFIG_PIN2, 22, TWI0_SCL, 100).ldi(8).st(1)
-    cycle = Asm().ldi(0).ld(1).ldi(0).op(API, TWI_XFER).jump(JNZ, 'next') \
-        .ld(1).st(0).ld(3).ldi(1).op(ADD).st(3) \
+    cycle = Asm().op(API, TWI_STATUS).op(DUP).jump(JNZ, 'check') \
+        .op(DROP).ld(1).op(API, TWI_CONTROL).jump(JMP, 'end') \
+        .label('check').op(DUP).ldi(TWI_RDY).op(AND).jump(JZ, 'failed') \
+        .op(DROP).ld(1).st(0).ld(3).ldi(1).op(ADD).st(3).jump(JMP, 'next') \
+        .label('failed').ldi(TWI_FAILED).op(AND).jump(JZ, 'end') \
         .label('next').ld(1).ldi(1).op(ADD).st(1) \
         .ld(1).ldi(0x77).op(CGT).jump(JZ, 'end') \
         .ld(3).st(2).ldi(0).st(3).ldi(8).st(1) \
@@ -129,8 +135,9 @@ def twi_scan():
 
 
 def uart_loop():
-    """UART2 9600 8N1, TX GPIO4 -> RX GPIO5 (jumper). Sends getSeconds() & 0xFF once a second.
-    Md0 = last byte received, Md1 = result of UartPut, Md2 = bytes received, Md3 = second of the
+    """UART2 9600 8N1, TX GPIO4 -> RX GPIO5 (jumper). Sends getSeconds() & 0xFF once a second with
+    UartPutByte, reads it back when UartBytesToRead reports it (a cycle after it arrived).
+    Md0 = last byte received, Md1 = result of UartPutByte, Md2 = bytes received, Md3 = second of the
     last send."""
     init = Asm().call(CONFIG_PIN2, 4, UART2_TX, 9600).call(CONFIG_PIN2, 5, UART2_RX, 0)
     cycle = Asm().call(SECONDS).ld(3).op(CEQ).jump(JNZ, 'rx') \

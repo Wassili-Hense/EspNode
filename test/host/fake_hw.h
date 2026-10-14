@@ -7,7 +7,7 @@
 
 #include "plc_io_hw.h"
 
-#define FAKE_UART_BUF   64
+#define FAKE_UART_BUF   PLC_HW_UART_RX_SIZE
 
 extern int64_t  fake_now_ms;                        // plc_hw_now_ms()
 extern bool     fake_level[PLC_HW_PINS];            // Inputs read it, outputs write it
@@ -16,9 +16,10 @@ extern uint8_t  fake_dac[PLC_HW_PINS];
 extern uint32_t fake_duty[PLC_HW_PWM_CHANNELS];
 extern int32_t  fake_count[PLC_HW_COUNTERS];
 
-extern int      fake_twi_status;                    // Result of the next transfers
-extern uint8_t  fake_twi_rx[32];                    // Data the device sends
-extern uint8_t  fake_twi_tx[32];                    // Data the last transfer wrote
+extern int      fake_twi_status;                    // PLC_HW_TWI_* result of the transfers
+extern bool     fake_twi_hold;                      // Transfers keep running while set
+extern uint8_t  fake_twi_rx[PLC_HW_TWI_SIZE];       // Data the device sends
+extern uint8_t  fake_twi_tx[PLC_HW_TWI_SIZE];       // Data the last transfer wrote
 extern size_t   fake_twi_tx_len;
 
 extern uint8_t  fake_uart_rx[PLC_HW_UART_PORTS][FAKE_UART_BUF];     // Received, not read yet

@@ -31,12 +31,48 @@ static plc_status_t result(plc_status_t stat, uint32_t val)
     return stat;
 }
 
+// TWI functions 1-4 on bus 0, or with the bus as the first argument
+static plc_status_t twi_call(uint8_t func, bool with_bus)
+{
+    uint32_t a[2] = { 0, 0 };
+    bool has_arg = (func == PLC_API_TWI_CONTROL) || (func == PLC_API_TWI_PUT_BYTE);
+    int n = (with_bus ? 1 : 0) + (has_arg ? 1 : 0);
+    if (!args(a, n)) {
+        return PLC_ERR_OFR_SP;
+    }
+    uint32_t bus = with_bus ? a[0] : 0;
+    uint32_t arg = with_bus ? a[1] : a[0];
+    uint32_t val = 0;
+
+    switch (func) {
+    case PLC_API_TWI_CONTROL:
+        return plc_io_twi_control(bus, arg);
+    case PLC_API_TWI_STATUS:
+        return result(plc_io_twi_status(bus, &val), val);
+    case PLC_API_TWI_PUT_BYTE:
+        return plc_io_twi_put(bus, arg);
+    default:
+        return result(plc_io_twi_get(bus, &val), val);
+    }
+}
+
 plc_status_t plc_api_call(uint8_t func)
 {
     uint32_t a[3];
     uint32_t val = 0;
 
     switch (func) {
+    case PLC_API_TWI_CONTROL:
+    case PLC_API_TWI_STATUS:
+    case PLC_API_TWI_PUT_BYTE:
+    case PLC_API_TWI_GET_BYTE:
+        return twi_call(func, false);
+    case PLC_API_TWI_BUS + PLC_API_TWI_CONTROL:
+    case PLC_API_TWI_BUS + PLC_API_TWI_STATUS:
+    case PLC_API_TWI_BUS + PLC_API_TWI_PUT_BYTE:
+    case PLC_API_TWI_BUS + PLC_API_TWI_GET_BYTE:
+        return twi_call(func - PLC_API_TWI_BUS, true);
+
     case PLC_API_NODE_STATUS:
         push(mqttsn_client_status() == MQTTSN_STATUS_CONNECT);
         return PLC_RUN;
@@ -49,33 +85,6 @@ plc_status_t plc_api_call(uint8_t func)
     case PLC_API_RANDOM:
         push(esp_random());
         return PLC_RUN;
-
-    case PLC_API_CONFIG_PIN1:
-        if (!args(a, 2)) {
-            return PLC_ERR_OFR_SP;
-        }
-        return plc_io_config(a[0], a[1], 0);
-    case PLC_API_CONFIG_PIN2:
-        if (!args(a, 3)) {
-            return PLC_ERR_OFR_SP;
-        }
-        return plc_io_config(a[0], a[1], (int32_t)a[2]);
-
-    case PLC_API_TWI_PUT:
-        if (!args(a, 2)) {
-            return PLC_ERR_OFR_SP;
-        }
-        return plc_io_twi_put(a[0], a[1]);
-    case PLC_API_TWI_XFER:
-        if (!args(a, 3)) {
-            return PLC_ERR_OFR_SP;
-        }
-        return result(plc_io_twi_xfer(a[0], a[1], a[2], &val), val);
-    case PLC_API_TWI_GET:
-        if (!args(a, 2)) {
-            return PLC_ERR_OFR_SP;
-        }
-        return result(plc_io_twi_get(a[0], a[1], &val), val);
 
     case PLC_API_UART_AVAIL:
         if (!args(a, 1)) {
@@ -92,6 +101,17 @@ plc_status_t plc_api_call(uint8_t func)
             return PLC_ERR_OFR_SP;
         }
         return result(plc_io_uart_put(a[0], a[1], &val), val);
+
+    case PLC_API_CONFIG_PIN1:
+        if (!args(a, 2)) {
+            return PLC_ERR_OFR_SP;
+        }
+        return plc_io_config(a[0], a[1], 0);
+    case PLC_API_CONFIG_PIN2:
+        if (!args(a, 3)) {
+            return PLC_ERR_OFR_SP;
+        }
+        return plc_io_config(a[0], a[1], (int32_t)a[2]);
 
     default:
         return PLC_ERR_UNK_API;

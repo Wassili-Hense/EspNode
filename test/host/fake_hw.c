@@ -12,8 +12,9 @@ uint8_t  fake_dac[PLC_HW_PINS];
 uint32_t fake_duty[PLC_HW_PWM_CHANNELS];
 int32_t  fake_count[PLC_HW_COUNTERS];
 int      fake_twi_status;
-uint8_t  fake_twi_rx[32];
-uint8_t  fake_twi_tx[32];
+bool     fake_twi_hold;
+uint8_t  fake_twi_rx[PLC_HW_TWI_SIZE];
+uint8_t  fake_twi_tx[PLC_HW_TWI_SIZE];
 size_t   fake_twi_tx_len;
 uint8_t  fake_uart_rx[PLC_HW_UART_PORTS][FAKE_UART_BUF];
 size_t   fake_uart_rx_len[PLC_HW_UART_PORTS];
@@ -24,6 +25,8 @@ const char *fake_fail;
 char     fake_calls[16384];
 
 static bool s_output[PLC_HW_PINS];
+static bool s_twi_started[PLC_HW_TWI_BUSES];       // Result not taken yet
+static size_t s_twi_rx_len[PLC_HW_TWI_BUSES];
 
 void fake_reset(void)
 {
@@ -33,7 +36,9 @@ void fake_reset(void)
     memset(fake_dac, 0, sizeof(fake_dac));
     memset(fake_duty, 0, sizeof(fake_duty));
     memset(fake_count, 0, sizeof(fake_count));
-    fake_twi_status = PLC_TWI_OK;
+    fake_twi_status = PLC_HW_TWI_OK;
+    fake_twi_hold = false;
+    memset(s_twi_started, 0, sizeof(s_twi_started));
     memset(fake_twi_rx, 0, sizeof(fake_twi_rx));
     fake_twi_tx_len = 0;
     memset(fake_uart_rx_len, 0, sizeof(fake_uart_rx_len));
@@ -206,19 +211,39 @@ bool plc_hw_twi_open(int bus, uint32_t sda, uint32_t scl, uint32_t khz)
     return call("twi_open", " %d %u %u %u", bus, (unsigned)sda, (unsigned)scl, (unsigned)khz);
 }
 
-int plc_hw_twi_xfer(int bus, uint8_t addr, const uint8_t *tx, size_t tx_len, uint8_t *rx, size_t rx_len)
+bool plc_hw_twi_start(int bus, uint8_t addr, const uint8_t *tx, size_t tx_len, size_t rx_len)
 {
-    call("twi_xfer", " %d 0x%02X %u %u", bus, addr, (unsigned)tx_len, (unsigned)rx_len);
+    if (s_twi_started[bus] && fake_twi_hold) {
+        return false;                       // Previous transfer still running
+    }
+    if (!call("twi_start", " %d 0x%02X %u %u", bus, addr, (unsigned)tx_len, (unsigned)rx_len)) {
+        return false;
+    }
     memcpy(fake_twi_tx, tx, tx_len);
     fake_twi_tx_len = tx_len;
-    if (fake_twi_status == PLC_TWI_OK) {
-        memcpy(rx, fake_twi_rx, rx_len);
+    s_twi_rx_len[bus] = rx_len;
+    s_twi_started[bus] = true;
+    return true;
+}
+
+int plc_hw_twi_poll(int bus, uint8_t *rx)
+{
+    if (!s_twi_started[bus]) {
+        return PLC_HW_TWI_ERROR;
+    }
+    if (fake_twi_hold) {
+        return PLC_HW_TWI_BUSY;
+    }
+    s_twi_started[bus] = false;
+    if (fake_twi_status == PLC_HW_TWI_OK) {
+        memcpy(rx, fake_twi_rx, s_twi_rx_len[bus]);
     }
     return fake_twi_status;
 }
 
 void plc_hw_twi_close(int bus)
 {
+    s_twi_started[bus] = false;
     call("twi_close", " %d", bus);
 }
 

@@ -14,6 +14,8 @@
 #define PLC_HW_COUNTERS     8
 #define PLC_HW_TWI_BUSES    2
 #define PLC_HW_UART_PORTS   3           // Port numbers 0..2
+#define PLC_HW_UART_RX_SIZE 512         // Receive buffer, bytes
+#define PLC_HW_TWI_SIZE     32          // Max bytes to write / to read in one transfer
 
 // Pin capabilities
 #define PLC_HW_CAP_VALID    0x01
@@ -21,11 +23,12 @@
 #define PLC_HW_CAP_ADC      0x04        // ADC1
 #define PLC_HW_CAP_DAC      0x08
 
-// TWI transfer status, as returned to the program
-#define PLC_TWI_OK          0
-#define PLC_TWI_NACK        1
-#define PLC_TWI_TIMEOUT     2
-#define PLC_TWI_ERROR       3
+// TWI transfer result
+#define PLC_HW_TWI_BUSY     (-1)        // Still running
+#define PLC_HW_TWI_OK       0
+#define PLC_HW_TWI_NACK     1
+#define PLC_HW_TWI_TIMEOUT  2
+#define PLC_HW_TWI_ERROR    3
 
 uint32_t plc_hw_caps(uint32_t pin);
 int64_t  plc_hw_now_ms(void);
@@ -58,11 +61,13 @@ bool     plc_hw_cnt_open(int unit, uint32_t pin, int edges, uint32_t filter_ns);
 int32_t  plc_hw_cnt_read(int unit);
 void     plc_hw_cnt_close(int unit);
 
-// TWI master, blocking transfer with timeout; tx_len == 0 && rx_len == 0 - probe
+// TWI master. A transfer (write tx, repeated START, read rx_len bytes; tx_len == 0 && rx_len == 0 -
+// probe) runs in the background: start returns false while the previous one is still running, poll
+// returns PLC_HW_TWI_BUSY until it ends, then its result once, with rx_len bytes in rx on success.
 bool     plc_hw_twi_open(int bus, uint32_t sda, uint32_t scl, uint32_t khz);
-int      plc_hw_twi_xfer(int bus, uint8_t addr, const uint8_t *tx, size_t tx_len,
-                         uint8_t *rx, size_t rx_len);
-void     plc_hw_twi_close(int bus);
+bool     plc_hw_twi_start(int bus, uint8_t addr, const uint8_t *tx, size_t tx_len, size_t rx_len);
+int      plc_hw_twi_poll(int bus, uint8_t *rx);
+void     plc_hw_twi_close(int bus);     // Waits for a running transfer
 
 // UART; de < 0 - no RS-485; format: bits 0-1 parity (0 none, 1 even, 2 odd), bit 2 - two stop bits
 bool     plc_hw_uart_open(int port, uint32_t tx, uint32_t rx, int de, uint32_t baud, uint32_t format);

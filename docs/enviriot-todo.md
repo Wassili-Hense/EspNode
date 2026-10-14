@@ -33,9 +33,9 @@ EspNode программируется лограммой: блоки ввода
 | Pwm | pin, частота, инверсия | `ConfigPin2(pin, PWM…, freq)` | `OUT pin` = скважность 0…65535 |
 | Counter | pin, фронты, фильтр нс | `ConfigPin2(pin, CNT_…, filter)` | выход = `IN pin`; вход сброса → `OUT pin, 0` |
 | TwiBus | шина, SDA, SCL, кГц | два `ConfigPin` | — |
-| драйверы TWI (датчики) | шина, адрес, период | — | `TwiPut`/`TwiXfer`/`TwiGet`, код как у Func |
+| драйверы TWI (датчики) | шина, адрес, период | — | `TwiControl`/`TwiStatus`/`TwiPutByte`/`TwiGetByte` (шина 0) или 40–43 (любая), код как у Func; обмен идёт в фоне, результат — в следующих циклах |
 | UartPort | порт, TX, RX, DE, скорость, формат | `ConfigPin` на каждый пин | — |
-| Modbus и т. п. (позже) | порт | — | `UartAvail`/`UartGet`/`UartPut` |
+| Modbus и т. п. (позже) | порт | — | `UartBytesToRead`/`UartGetByte`/`UartPutByte`; кадр — по паузе, как в X13 |
 
 Номера режимов и смысл значений — таблица «Режимы пинов» в [plc-api.md](plc-api.md#режимы-пинов).
 Ошибка настройки останавливает программу (`0x8A` — недопустимый пин или параметр, `0x89` — пин или
@@ -45,19 +45,19 @@ EspNode программируется лограммой: блоки ввода
 
 - Объявления в `LoadNativeFunctions`, все аргументы целые:
 
-  | Имя | `Addr` | `pIn` | `pOut` |
-  |---|---|---|---|
-  | `ConfigPin1` | 30 | 2 | 0 |
-  | `ConfigPin2` | 31 | 3 | 0 |
-  | `TwiPut` | 40 | 2 | 0 |
-  | `TwiXfer` | 41 | 3 | 1 |
-  | `TwiGet` | 42 | 2 | 1 |
-  | `UartAvail` | 50 | 1 | 1 |
-  | `UartGet` | 51 | 1 | 1 |
-  | `UartPut` | 52 | 2 | 1 |
+  | Имя | `Addr` | `pIn` | `pOut` | |
+  |---|---|---|---|---|
+  | `TwiControl`, `TwiStatus`, `TwiPutByte`, `TwiGetByte` | 1–4 | | | уже есть, шина 0 |
+  | `UartBytesToRead`, `UartGetByte`, `UartPutByte` | 21–23 | | | уже есть |
+  | `ConfigPin1` | 30 | 2 | 0 | новое |
+  | `ConfigPin2` | 31 | 3 | 0 | новое |
+  | `TwiBusControl` (bus, ctrl) | 40 | 2 | 0 | новое, имена — на ваше усмотрение |
+  | `TwiBusStatus` (bus) | 41 | 1 | 1 | новое |
+  | `TwiBusPutByte` (bus, data) | 42 | 2 | 0 | новое |
+  | `TwiBusGetByte` (bus) | 43 | 1 | 1 | новое |
 
-  Имена X13 (`TwiControl`…`TwiGetByte` 1–4, `UartInit`… 20–23) на EspNode не работают (`0x88`); для
-  программ EspNode их лучше не предлагать.
+  `UartInit` (20) на EspNode не работает (`0x88`): порт открывает `ConfigPin`. Для программ EspNode его,
+  `NowSeconds` и `Today` (9, 10) лучше не предлагать.
 - `IN`/`OUT`: операнд кодируется как сейчас (`Addr`: `place << 24 | type << 16 | base`), `base` —
   номер GPIO, `place` и `type` — 0. Нужен способ сослаться на пин из кода блока, например
   `Merker { type = INPUT/OUTPUT, Addr = gpio }` для ввода и вывода блока.

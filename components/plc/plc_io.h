@@ -38,7 +38,6 @@ enum {
     PLC_PIN_UART2_TX    = 23,   // UART2
     PLC_PIN_UART2_RX    = 24,
     PLC_PIN_UART2_DE    = 25,
-    PLC_PIN_ONEWIRE     = 26,   // Reserved, not implemented
     PLC_PIN_MODES
 };
 
@@ -60,12 +59,26 @@ plc_status_t plc_io_config(uint32_t pin, uint32_t mode, int32_t option);
 plc_status_t plc_io_in(uint32_t pin, uint32_t *value);
 plc_status_t plc_io_out(uint32_t pin, uint32_t value);
 
-// TWI: bytes to write, transfer (status PLC_TWI_*), received bytes
-plc_status_t plc_io_twi_put(uint32_t bus, uint32_t byte);
-plc_status_t plc_io_twi_xfer(uint32_t bus, uint32_t addr, uint32_t rx_len, uint32_t *status);
-plc_status_t plc_io_twi_get(uint32_t bus, uint32_t index, uint32_t *byte);
+// TWI as in X13 (API 1-4 for bus 0, 40-43 with the bus number). Control word and status:
+// address (7 bit) | access << 8 | write << 16 | read << 24. TwiControl starts a transaction (ignored
+// while one is open), TwiPutByte supplies the bytes to write - the transfer starts with the last one,
+// TwiStatus reports the progress (0 - no transaction), TwiGetByte returns the bytes read.
+#define PLC_TWI_WRITE       0x01        // Access flags
+#define PLC_TWI_READ        0x02
+#define PLC_TWI_BUSY        0x08        // Transfer running
+#define PLC_TWI_RDY         0x10        // Done, read the bytes
+#define PLC_TWI_WD          0x20        // Timeout
+#define PLC_TWI_SLANACK     0x40        // No answer
+#define PLC_TWI_ERROR       0x80        // Bus error
+#define PLC_TWI_TIMEOUT_MS  250         // From TwiControl to the end of the transfer
 
-// UART
+plc_status_t plc_io_twi_control(uint32_t bus, uint32_t ctrl);
+plc_status_t plc_io_twi_status(uint32_t bus, uint32_t *status);
+plc_status_t plc_io_twi_put(uint32_t bus, uint32_t byte);
+plc_status_t plc_io_twi_get(uint32_t bus, uint32_t *byte);
+
+// UART as in X13 (API 21-23), the port is the UART number. Bytes to read are reported after a pause:
+// when nothing new arrived since the previous call (end of a frame) or the buffer is half full.
 plc_status_t plc_io_uart_avail(uint32_t port, uint32_t *count);
 plc_status_t plc_io_uart_get(uint32_t port, uint32_t *value);      // 0xFFFFFFFF (-1) - empty
 plc_status_t plc_io_uart_put(uint32_t port, uint32_t byte, uint32_t *ok);

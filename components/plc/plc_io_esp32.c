@@ -1,6 +1,8 @@
 /*
  * PLC IO hardware layer on ESP-IDF, ESP32.
  */
+#include <string.h>
+
 #include "driver/dac_oneshot.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -12,6 +14,9 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "hal/uart_ll.h"
 #include "soc/dac_channel.h"
 #include "soc/soc_caps.h"
@@ -26,8 +31,24 @@
 #define CNT_HIGH_LIMIT      32767                   // 16-bit hardware counter, accumulated by the driver
 #define CNT_LOW_LIMIT       (-32768)
 #define CNT_FILTER_MAX_NS   12700                   // 1023 APB cycles
-#define TWI_TIMEOUT_MS      25
-#define UART_RX_BUF_SIZE    512                     // More than the hardware FIFO
+#define TWI_TIMEOUT_MS      200                     // Per transfer, below PLC_TWI_TIMEOUT_MS
+#define TWI_TASK_STACK      3072
+#define TWI_TASK_PRIO       5                       // As the node task
+#define TWI_IDLE            (-2)                    // No transfer, or its result taken
+
+// A TWI bus and the task running its transfers
+typedef struct {
+    TaskHandle_t                task;
+    SemaphoreHandle_t           go;
+    i2c_master_bus_handle_t     bus;
+    i2c_master_dev_handle_t     dev;                // Address set before each transfer
+    uint8_t                     addr;
+    size_t                      tx_len;
+    size_t                      rx_len;
+    uint8_t                     tx[PLC_HW_TWI_SIZE];
+    uint8_t                     rx[PLC_HW_TWI_SIZE];
+    int                         result;             // PLC_HW_TWI_*, TWI_IDLE; shared with the task
+} twi_t;
 
 static struct {
     adc_oneshot_unit_handle_t   adc;
@@ -36,8 +57,7 @@ static struct {
     uint8_t                     pwm_bits[PLC_HW_PWM_TIMERS];
     pcnt_unit_handle_t          cnt[PLC_HW_COUNTERS];
     pcnt_channel_handle_t       cnt_ch[PLC_HW_COUNTERS];
-    i2c_master_bus_handle_t     twi[PLC_HW_TWI_BUSES];
-    i2c_master_dev_handle_t     twi_dev[PLC_HW_TWI_BUSES];     // Address set before each transfer
+    twi_t                       twi[PLC_HW_TWI_BUSES];
 } s;
 
 static bool adc_channel(uint32_t pin, adc_channel_t *ch)
@@ -328,10 +348,60 @@ void plc_hw_cnt_close(int unit)
 }
 
 ////////////////////////////////////////////////////////////////////////
-// TWI
+// TWI: transfers run in a task per bus, so that the PLC cycle and MQTT-SN don't wait for them
+
+static int twi_transfer(twi_t *t)
+{
+    esp_err_t err;
+    if ((t->tx_len == 0) && (t->rx_len == 0)) {
+        err = i2c_master_probe(t->bus, t->addr, TWI_TIMEOUT_MS);
+    } else {
+        err = i2c_master_device_change_address(t->dev, t->addr, TWI_TIMEOUT_MS);
+        if (err != ESP_OK) {
+            // Bus busy
+        } else if (t->rx_len == 0) {
+            err = i2c_master_transmit(t->dev, t->tx, t->tx_len, TWI_TIMEOUT_MS);
+        } else if (t->tx_len == 0) {
+            err = i2c_master_receive(t->dev, t->rx, t->rx_len, TWI_TIMEOUT_MS);
+        } else {
+            err = i2c_master_transmit_receive(t->dev, t->tx, t->tx_len, t->rx, t->rx_len, TWI_TIMEOUT_MS);
+        }
+    }
+
+    switch (err) {
+    case ESP_OK:
+        return PLC_HW_TWI_OK;
+    case ESP_ERR_NOT_FOUND:                 // Probe
+    case ESP_ERR_INVALID_RESPONSE:          // Transfer
+        return PLC_HW_TWI_NACK;
+    case ESP_ERR_TIMEOUT:
+        return PLC_HW_TWI_TIMEOUT;
+    default:
+        return PLC_HW_TWI_ERROR;
+    }
+}
+
+static void twi_task(void *arg)
+{
+    twi_t *t = arg;
+    for (;;) {
+        xSemaphoreTake(t->go, portMAX_DELAY);
+        int res = twi_transfer(t);
+        __atomic_store_n(&t->result, res, __ATOMIC_RELEASE);     // rx before the result
+    }
+}
 
 bool plc_hw_twi_open(int bus, uint32_t sda, uint32_t scl, uint32_t khz)
 {
+    twi_t *t = &s.twi[bus];
+    if (t->task == NULL) {                  // Kept for later opens
+        t->go = xSemaphoreCreateBinary();
+        if ((t->go == NULL) ||
+            (xTaskCreate(twi_task, "plc_twi", TWI_TASK_STACK, t, TWI_TASK_PRIO, &t->task) != pdPASS)) {
+            return false;
+        }
+    }
+
     const i2c_master_bus_config_t bcfg = {
         .i2c_port           = bus,
         .sda_io_num         = (gpio_num_t)sda,
@@ -340,8 +410,8 @@ bool plc_hw_twi_open(int bus, uint32_t sda, uint32_t scl, uint32_t khz)
         .glitch_ignore_cnt  = 7,
         .flags.enable_internal_pullup = true,
     };
-    if (i2c_new_master_bus(&bcfg, &s.twi[bus]) != ESP_OK) {
-        s.twi[bus] = NULL;
+    if (i2c_new_master_bus(&bcfg, &t->bus) != ESP_OK) {
+        t->bus = NULL;
         return false;
     }
 
@@ -350,59 +420,65 @@ bool plc_hw_twi_open(int bus, uint32_t sda, uint32_t scl, uint32_t khz)
         .device_address     = 0,
         .scl_speed_hz       = khz * 1000,
     };
-    if (i2c_master_bus_add_device(s.twi[bus], &dcfg, &s.twi_dev[bus]) != ESP_OK) {
-        i2c_del_master_bus(s.twi[bus]);
-        s.twi[bus] = NULL;
+    if (i2c_master_bus_add_device(t->bus, &dcfg, &t->dev) != ESP_OK) {
+        i2c_del_master_bus(t->bus);
+        t->bus = NULL;
         return false;
     }
 
-    // A missing device is a status for the program, not a console error on every cycle
+    // A missing device is a status for the program, not a console error on every request
     esp_log_level_set("i2c.master", ESP_LOG_NONE);
+    __atomic_store_n(&t->result, TWI_IDLE, __ATOMIC_RELAXED);
     return true;
 }
 
-int plc_hw_twi_xfer(int bus, uint8_t addr, const uint8_t *tx, size_t tx_len, uint8_t *rx, size_t rx_len)
+bool plc_hw_twi_start(int bus, uint8_t addr, const uint8_t *tx, size_t tx_len, size_t rx_len)
 {
-    i2c_master_dev_handle_t dev = s.twi_dev[bus];
-    esp_err_t err;
-
-    if ((tx_len == 0) && (rx_len == 0)) {
-        err = i2c_master_probe(s.twi[bus], addr, TWI_TIMEOUT_MS);
-    } else {
-        err = i2c_master_device_change_address(dev, addr, TWI_TIMEOUT_MS);
-        if (err != ESP_OK) {
-            // Bus busy
-        } else if (rx_len == 0) {
-            err = i2c_master_transmit(dev, tx, tx_len, TWI_TIMEOUT_MS);
-        } else if (tx_len == 0) {
-            err = i2c_master_receive(dev, rx, rx_len, TWI_TIMEOUT_MS);
-        } else {
-            err = i2c_master_transmit_receive(dev, tx, tx_len, rx, rx_len, TWI_TIMEOUT_MS);
-        }
+    twi_t *t = &s.twi[bus];
+    if ((t->bus == NULL) || (tx_len > PLC_HW_TWI_SIZE) || (rx_len > PLC_HW_TWI_SIZE) ||
+        (__atomic_load_n(&t->result, __ATOMIC_ACQUIRE) == PLC_HW_TWI_BUSY)) {
+        return false;
     }
+    t->addr = addr;
+    memcpy(t->tx, tx, tx_len);
+    t->tx_len = tx_len;
+    t->rx_len = rx_len;
+    __atomic_store_n(&t->result, PLC_HW_TWI_BUSY, __ATOMIC_RELEASE);
+    xSemaphoreGive(t->go);
+    return true;
+}
 
-    switch (err) {
-    case ESP_OK:
-        return PLC_TWI_OK;
-    case ESP_ERR_NOT_FOUND:                 // Probe
-    case ESP_ERR_INVALID_RESPONSE:          // Transfer
-        return PLC_TWI_NACK;
-    case ESP_ERR_TIMEOUT:
-        return PLC_TWI_TIMEOUT;
-    default:
-        return PLC_TWI_ERROR;
+int plc_hw_twi_poll(int bus, uint8_t *rx)
+{
+    twi_t *t = &s.twi[bus];
+    int res = __atomic_load_n(&t->result, __ATOMIC_ACQUIRE);
+    if (res == PLC_HW_TWI_BUSY) {
+        return res;
     }
+    if (res == TWI_IDLE) {
+        return PLC_HW_TWI_ERROR;            // Nothing was started
+    }
+    if (res == PLC_HW_TWI_OK) {
+        memcpy(rx, t->rx, t->rx_len);
+    }
+    __atomic_store_n(&t->result, TWI_IDLE, __ATOMIC_RELAXED);
+    return res;
 }
 
 void plc_hw_twi_close(int bus)
 {
-    if (s.twi[bus] == NULL) {
+    twi_t *t = &s.twi[bus];
+    if (t->bus == NULL) {
         return;
     }
-    i2c_master_bus_rm_device(s.twi_dev[bus]);
-    i2c_del_master_bus(s.twi[bus]);
-    s.twi[bus] = NULL;
-    s.twi_dev[bus] = NULL;
+    // The task uses the bus until the transfer ends, at most TWI_TIMEOUT_MS
+    while (__atomic_load_n(&t->result, __ATOMIC_ACQUIRE) == PLC_HW_TWI_BUSY) {
+        vTaskDelay(1);
+    }
+    i2c_master_bus_rm_device(t->dev);
+    i2c_del_master_bus(t->bus);
+    t->bus = NULL;
+    t->dev = NULL;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -426,7 +502,7 @@ bool plc_hw_uart_open(int port, uint32_t tx, uint32_t rx, int de, uint32_t baud,
     if ((uart_param_config((uart_port_t)port, &cfg) != ESP_OK) ||
         (uart_set_pin((uart_port_t)port, (int)tx, (int)rx, (de >= 0) ? de : UART_PIN_NO_CHANGE,
                       UART_PIN_NO_CHANGE) != ESP_OK) ||
-        (uart_driver_install((uart_port_t)port, UART_RX_BUF_SIZE, 0, 0, NULL, 0) != ESP_OK)) {
+        (uart_driver_install((uart_port_t)port, PLC_HW_UART_RX_SIZE, 0, 0, NULL, 0) != ESP_OK)) {
         return false;
     }
     // RS-485: the driver drives DE while the FIFO is sending

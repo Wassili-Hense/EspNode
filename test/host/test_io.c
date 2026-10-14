@@ -51,8 +51,7 @@ static void test_pins(void)
     CHECK(CFG(6, IN, 0) == PLC_ERR_PARM);           // Flash
     CHECK(CFG(1, OUT, 0) == PLC_ERR_PARM);          // Console
     CHECK(CFG(16, IN, 0) == PLC_ERR_PARM);          // MQTT-SN link
-    CHECK(CFG(4, ONEWIRE, 0) == PLC_ERR_PARM);      // Not implemented
-    CHECK(CFG(4, MODES, 0) == PLC_ERR_PARM);
+    CHECK(CFG(4, MODES, 0) == PLC_ERR_PARM);        // 26, no such mode
     CHECK(plc_io_config(4, 0xFFFFFFFF, 0) == PLC_ERR_PARM);
     CHECK(CFG(4, OFF, 0) == PLC_RUN);               // Free pin: nothing to do
     CHECK(fake_calls[0] == 0);
@@ -244,53 +243,131 @@ static void test_counter(void)
     CHECK(CALLED("cnt_open 0 19 0 0"));
 }
 
+// TWI control word / status: address | access << 8 | write << 16 | read << 24
+#define TWI_CTRL(addr, write, read)     ((addr) | ((uint32_t)(write) << 16) | ((uint32_t)(read) << 24))
+#define TWI_ST(addr, access, write, read) (TWI_CTRL(addr, write, read) | ((uint32_t)(access) << 8))
+
+static uint32_t twi_status(uint32_t bus)
+{
+    uint32_t st = 0xDEADBEEF;
+    CHECK(plc_io_twi_status(bus, &st) == PLC_RUN);
+    return st;
+}
+
+static uint32_t twi_get(uint32_t bus)
+{
+    uint32_t v = 0xDEADBEEF;
+    CHECK(plc_io_twi_get(bus, &v) == PLC_RUN);
+    return v;
+}
+
 static void test_twi(void)
 {
-    uint32_t v, st;
+    const uint32_t WR = PLC_TWI_WRITE, RD = PLC_TWI_READ;
+    uint32_t v;
     setup();
     CHECK(CFG(21, TWI0_SDA, 0) == PLC_RUN);
     CHECK(!CALLED("twi_open"));
-    CHECK(plc_io_twi_put(0, 1) == PLC_ERR_PARM);    // Bus not ready
+    CHECK(plc_io_twi_control(0, TWI_CTRL(0x48, 0, 0)) == PLC_ERR_PARM);    // Bus not ready
+    CHECK(plc_io_twi_status(0, &v) == PLC_ERR_PARM);
+    CHECK(plc_io_twi_put(0, 1) == PLC_ERR_PARM);
+    CHECK(plc_io_twi_get(0, &v) == PLC_ERR_PARM);
     CHECK(CFG(22, TWI0_SCL, 400) == PLC_RUN);
     CHECK(CALLED("twi_open 0 21 22 400"));
-    CHECK(plc_io_in(21, &v) == PLC_ERR_PARM);       // Bus pins have no IN/OUT
+    CHECK(plc_io_twi_status(2, &v) == PLC_ERR_PARM);
+    CHECK(plc_io_twi_status(1, &v) == PLC_ERR_PARM);   // Bus 1 not configured
+    CHECK(plc_io_in(21, &v) == PLC_ERR_PARM);           // Bus pins have no IN/OUT
     CHECK(plc_io_out(22, 1) == PLC_ERR_PARM);
+    CHECK(twi_status(0) == 0);                          // Bus free
 
-    // Write 2 bytes, read 2
+    // Write 2 bytes, read 2; the transfer starts with the last byte and runs in the background
     fake_twi_rx[0] = 0xAB;
     fake_twi_rx[1] = 0xCD;
+    fake_twi_hold = true;
+    CHECK(plc_io_twi_control(0, TWI_CTRL(0x48, 2, 2)) == PLC_RUN);
+    CHECK(twi_status(0) == TWI_ST(0x48, WR | RD, 2, 2));
     CHECK(plc_io_twi_put(0, 0x10) == PLC_RUN);
-    CHECK(plc_io_twi_put(0, 0x120) == PLC_RUN);     // Low byte
-    CHECK((plc_io_twi_xfer(0, 0x48, 2, &st) == PLC_RUN) && (st == PLC_TWI_OK));
-    CHECK(CALLED("twi_xfer 0 0x48 2 2"));
+    CHECK(!CALLED("twi_start"));
+    CHECK(plc_io_twi_put(0, 0x120) == PLC_RUN);        // Low byte
+    CHECK(CALLED("twi_start 0 0x48 2 2"));
     CHECK((fake_twi_tx_len == 2) && (fake_twi_tx[0] == 0x10) && (fake_twi_tx[1] == 0x20));
-    CHECK((plc_io_twi_get(0, 0, &v) == PLC_RUN) && (v == 0xAB));
-    CHECK((plc_io_twi_get(0, 1, &v) == PLC_RUN) && (v == 0xCD));
-    CHECK(plc_io_twi_get(0, 2, &v) == PLC_ERR_PARM);
+    CHECK(twi_status(0) == TWI_ST(0x48, WR | RD | PLC_TWI_BUSY, 2, 2));
+    CHECK(plc_io_twi_control(0, TWI_CTRL(0x50, 0, 1)) == PLC_RUN);     // Ignored: transaction open
+    CHECK(plc_io_twi_put(0, 0x30) == PLC_RUN);                         // Ignored: running
+    CHECK(twi_get(0) == 0);                                             // Nothing read yet
+    fake_twi_hold = false;
+    CHECK(twi_status(0) == TWI_ST(0x48, PLC_TWI_RDY, 2, 2));
+    CHECK((twi_get(0) == 0xAB) && (twi_get(0) == 0xCD));
+    CHECK(twi_get(0) == 0);
+    CHECK(twi_status(0) == 0);                          // Closed by the last byte
+
+    // Read only and write only start at once / with the byte; write only closes at its status
+    fake_clear();
+    plc_io_twi_control(0, TWI_CTRL(0x49, 0, 1));
+    CHECK(CALLED("twi_start 0 0x49 0 1"));
+    CHECK(twi_status(0) == TWI_ST(0x49, PLC_TWI_RDY, 0, 1));
+    CHECK(twi_get(0) == 0xAB);
+    plc_io_twi_control(0, TWI_CTRL(0x4A, 1, 0));
+    plc_io_twi_put(0, 0x55);
+    plc_io_twi_put(0, 0x66);                            // More than announced: ignored
+    CHECK(CALLED("twi_start 0 0x4A 1 0") && (fake_twi_tx_len == 1) && (fake_twi_tx[0] == 0x55));
+    CHECK(twi_status(0) == TWI_ST(0x4A, PLC_TWI_RDY, 1, 0));
+    CHECK(twi_status(0) == 0);
 
     // Probe: nothing to write, nothing to read
-    fake_clear();
-    CHECK((plc_io_twi_xfer(0, 0x48, 0, &st) == PLC_RUN) && (st == PLC_TWI_OK));
-    CHECK(CALLED("twi_xfer 0 0x48 0 0"));
-    CHECK(plc_io_twi_get(0, 0, &v) == PLC_ERR_PARM);
+    plc_io_twi_control(0, TWI_CTRL(0x4B, 0, 0));
+    CHECK(CALLED("twi_start 0 0x4B 0 0"));
+    CHECK(twi_status(0) == TWI_ST(0x4B, PLC_TWI_RDY, 0, 0));
 
-    // NACK is a status, not an error
-    fake_twi_status = PLC_TWI_NACK;
+    // Failures are statuses, closed by the TwiStatus that reports them
+    fake_twi_status = PLC_HW_TWI_NACK;
+    plc_io_twi_control(0, TWI_CTRL(0x50, 1, 2));
     plc_io_twi_put(0, 1);
-    CHECK((plc_io_twi_xfer(0, 0x50, 1, &st) == PLC_RUN) && (st == PLC_TWI_NACK));
-    CHECK(plc_io_twi_get(0, 0, &v) == PLC_ERR_PARM);
-    fake_twi_status = PLC_TWI_OK;
+    CHECK(twi_status(0) == TWI_ST(0x50, WR | RD | PLC_TWI_SLANACK, 1, 0));      // X13: read = 0
+    CHECK(twi_status(0) == 0);
+    CHECK(twi_get(0) == 0);
+    fake_twi_status = PLC_HW_TWI_TIMEOUT;
+    plc_io_twi_control(0, TWI_CTRL(0x50, 0, 1));
+    CHECK(twi_status(0) == TWI_ST(0x50, RD | PLC_TWI_WD, 0, 1));
+    fake_twi_status = PLC_HW_TWI_ERROR;
+    plc_io_twi_control(0, TWI_CTRL(0x50, 0, 1));
+    CHECK(twi_status(0) == TWI_ST(0x50, RD | PLC_TWI_ERROR, 0, 1));
+    fake_twi_status = PLC_HW_TWI_OK;
+
+    // 250 ms without the bytes to write
+    plc_io_twi_control(0, TWI_CTRL(0x51, 2, 0));
+    plc_io_twi_put(0, 1);
+    fake_now_ms += PLC_TWI_TIMEOUT_MS;
+    CHECK(twi_status(0) == TWI_ST(0x51, WR, 2, 0));
+    fake_now_ms += 1;
+    CHECK(twi_status(0) == TWI_ST(0x51, WR | PLC_TWI_WD, 2, 0));
+    CHECK(twi_status(0) == 0);
+
+    // Hardware stuck: the next transaction starts when it is free again
+    fake_twi_hold = true;
+    plc_io_twi_control(0, TWI_CTRL(0x52, 0, 1));
+    fake_now_ms += PLC_TWI_TIMEOUT_MS + 1;
+    CHECK(twi_status(0) == TWI_ST(0x52, RD | PLC_TWI_BUSY | PLC_TWI_WD, 0, 1));
+    fake_clear();
+    plc_io_twi_control(0, TWI_CTRL(0x53, 0, 1));
+    CHECK(!CALLED("twi_start"));
+    CHECK(twi_status(0) == TWI_ST(0x53, RD, 0, 1));
+    fake_twi_hold = false;
+    CHECK(twi_status(0) == TWI_ST(0x53, PLC_TWI_RDY, 0, 1));
+    CHECK(CALLED("twi_start 0 0x53 0 1"));
+    CHECK(twi_get(0) == 0xAB);
 
     // Limits
-    for (int i = 0; i < 32; i++) {
-        CHECK(plc_io_twi_put(0, (uint32_t)i) == PLC_RUN);
+    CHECK(plc_io_twi_control(0, TWI_CTRL(0x80, 0, 0)) == PLC_ERR_PARM);
+    CHECK(plc_io_twi_control(0, TWI_CTRL(0x48, 33, 0)) == PLC_ERR_PARM);
+    CHECK(plc_io_twi_control(0, TWI_CTRL(0x48, 0, 33)) == PLC_ERR_PARM);
+    CHECK(twi_status(0) == 0);
+    plc_io_twi_control(0, TWI_CTRL(0x48, 32, 32));
+    for (uint32_t i = 0; i < 32; i++) {
+        plc_io_twi_put(0, i);
     }
-    CHECK(plc_io_twi_put(0, 32) == PLC_ERR_PARM);
-    CHECK(plc_io_twi_xfer(0, 0x80, 0, &st) == PLC_ERR_PARM);
-    CHECK(plc_io_twi_xfer(0, 0x48, 33, &st) == PLC_ERR_PARM);
-    CHECK(plc_io_twi_xfer(2, 0x48, 0, &st) == PLC_ERR_PARM);
-    CHECK(plc_io_twi_xfer(1, 0x48, 0, &st) == PLC_ERR_PARM);    // Bus 1 not configured
-    CHECK((plc_io_twi_xfer(0, 0x48, 0, &st) == PLC_RUN) && (fake_twi_tx_len == 32));
+    CHECK((fake_twi_tx_len == 32) && (fake_twi_tx[31] == 31));
+    CHECK(twi_status(0) == TWI_ST(0x48, PLC_TWI_RDY, 32, 32));
 
     // Pins
     CHECK(CFG(23, TWI0_SDA, 0) == PLC_ERR_RSC_BUSY);   // Bus 0 SDA is 21
@@ -299,14 +376,16 @@ static void test_twi(void)
     CHECK(CFG(18, TWI1_SDA, 0) == PLC_RUN);
     CHECK(CFG(19, TWI1_SCL, 0) == PLC_RUN);
     CHECK(CALLED("twi_open 1 18 19 100"));
+    CHECK(twi_status(1) == 0);                          // Buses are independent
 
-    // Releasing a pin closes the bus
+    // Releasing a pin closes the bus and its transaction
     fake_clear();
     CHECK(CFG(21, OFF, 0) == PLC_RUN);
     CHECK(CALLED("twi_close 0") && CALLED("release 21"));
-    CHECK(plc_io_twi_put(0, 1) == PLC_ERR_PARM);
+    CHECK(plc_io_twi_status(0, &v) == PLC_ERR_PARM);
     CHECK(CFG(23, TWI0_SDA, 0) == PLC_RUN);
     CHECK(CALLED("twi_open 0 23 22 400"));
+    CHECK(twi_status(0) == 0);
 
     // Hardware refuses: the pin that completed the bus is released
     setup();
@@ -317,6 +396,19 @@ static void test_twi(void)
     fake_fail = NULL;
     CHECK(CFG(22, TWI0_SCL, 0) == PLC_RUN);
     CHECK(CALLED("twi_open 0 21 22 100"));
+}
+
+static void uart_receive(int port, const uint8_t *data, size_t len)
+{
+    memcpy(&fake_uart_rx[port][fake_uart_rx_len[port]], data, len);
+    fake_uart_rx_len[port] += len;
+}
+
+static uint32_t uart_avail(uint32_t port)
+{
+    uint32_t v = 0xDEADBEEF;
+    CHECK(plc_io_uart_avail(port, &v) == PLC_RUN);
+    return v;
 }
 
 static void test_uart(void)
@@ -330,14 +422,30 @@ static void test_uart(void)
     CHECK(CFG(5, UART2_RX, 1) == PLC_RUN);              // Even parity
     CHECK(CALLED("uart_open 2 4 5 -1 115200 1"));
 
-    CHECK((plc_io_uart_avail(2, &v) == PLC_RUN) && (v == 0));
-    fake_uart_rx[2][0] = 0x41;
-    fake_uart_rx[2][1] = 0x42;
-    fake_uart_rx_len[2] = 2;
-    CHECK((plc_io_uart_avail(2, &v) == PLC_RUN) && (v == 2));
-    CHECK((plc_io_uart_get(2, &v) == PLC_RUN) && (v == 0x41));
-    CHECK((plc_io_uart_get(2, &v) == PLC_RUN) && (v == 0x42));
+    // Bytes are reported when nothing new arrived since the previous call: the frame has ended
+    CHECK(uart_avail(2) == 0);
+    uart_receive(2, (const uint8_t *)"AB", 2);
+    CHECK(uart_avail(2) == 0);
+    CHECK(uart_avail(2) == 2);
+    CHECK((plc_io_uart_get(2, &v) == PLC_RUN) && (v == 'A'));
+    CHECK(uart_avail(2) == 1);                          // Taking bytes is not an arrival
+    uart_receive(2, (const uint8_t *)"C", 1);
+    CHECK(uart_avail(2) == 0);
+    CHECK(uart_avail(2) == 2);
+    CHECK((plc_io_uart_get(2, &v) == PLC_RUN) && (v == 'B'));
+    CHECK((plc_io_uart_get(2, &v) == PLC_RUN) && (v == 'C'));
     CHECK((plc_io_uart_get(2, &v) == PLC_RUN) && (v == 0xFFFFFFFF));
+    CHECK(uart_avail(2) == 0);
+
+    // Half of the buffer is reported at once, before it overflows
+    static uint8_t big[PLC_HW_UART_RX_SIZE / 2];
+    uart_receive(2, big, sizeof(big) - 1);
+    CHECK(uart_avail(2) == 0);
+    uart_receive(2, big, 1);
+    CHECK(uart_avail(2) == sizeof(big));
+    fake_uart_rx_len[2] = 0;
+    CHECK(uart_avail(2) == 0);
+
     CHECK((plc_io_uart_put(2, 0x155, &v) == PLC_RUN) && (v == 1));
     CHECK((fake_uart_tx_len[2] == 1) && (fake_uart_tx[2][0] == 0x55));
     fake_uart_tx_room = 0;
@@ -438,23 +546,26 @@ static void test_restart(void)
     CHECK(CFG(21, CNT_RISE, 0) == PLC_RUN);
     CHECK(CFG(22, CNT_RISE, 0) == PLC_RUN);
 
-    // TWI buffer of a stopped program is not sent by the next one
+    // TWI transaction of a stopped program is dropped
     setup();
     CFG(21, TWI0_SDA, 0);
     CFG(22, TWI0_SCL, 0);
+    plc_io_twi_control(0, TWI_CTRL(0x48, 2, 0));
     plc_io_twi_put(0, 0x77);
     plc_io_restart_begin();
     CFG(21, TWI0_SDA, 0);
     CFG(22, TWI0_SCL, 0);
-    plc_io_twi_xfer(0, 0x48, 0, &v);
-    CHECK(fake_twi_tx_len == 0);
+    CHECK(twi_status(0) == 0);
+    fake_clear();
+    plc_io_twi_put(0, 0x78);
+    CHECK(!CALLED("twi_start"));
 }
 
 ////////////////////////////////////////////////////////////////////////
 // Bytecode
 
 enum {
-    LDI_0 = 0x38, LDI_U1 = 0x3C, LDI_1 = 0x3E,
+    LDI_0 = 0x38, LDI_S4 = 0x3B, LDI_U1 = 0x3C, LDI_1 = 0x3E,
     STM_S4_C16 = 0xBB, IN = 0xC0, OUT = 0xC1, API = 0xC6, JMP = 0xF3, RET = 0xFF,
 };
 
@@ -502,36 +613,59 @@ static void test_program(void)
     fake_level[4] = false;
     CHECK((plc_vm_cycle() == PLC_OK) && !fake_level[2]);
 
-    // TWI: ram[0] = TwiXfer(0, 0x48, 1) after TwiPut(0, 0x42), ram[1] = TwiGet(0, 0)
+    // TWI as X13, bus 0: TwiControl(0x01010048), TwiPutByte(0x42), ram[0] = TwiStatus(), ram[1] = TwiGetByte()
     setup();
     {
         const uint8_t init[] = { LDI_U1, 16, LDI_U1, 21, API, 30,
                                  LDI_U1, 100, LDI_U1, 17, LDI_U1, 22, API, 31, RET };
-        const uint8_t cycle[] = { LDI_U1, 0x42, LDI_0, API, 40,
-                                  LDI_1, LDI_U1, 0x48, LDI_0, API, 41, STM_S4_C16, 0, 0,
-                                  LDI_0, LDI_0, API, 42, STM_S4_C16, 1, 0, RET };
+        const uint8_t cycle[] = { LDI_S4, 0x48, 0, 1, 1, API, 1, LDI_U1, 0x42, API, 3,
+                                  API, 2, STM_S4_C16, 0, 0, API, 4, STM_S4_C16, 1, 0, RET };
         LOAD(init, cycle);
     }
     fake_twi_rx[0] = 0x99;
-    ram[0] = 0xFFFF;
     CHECK(plc_vm_cycle() == PLC_OK);
     CHECK(CALLED("twi_open 0 21 22 100"));
     CHECK(plc_vm_cycle() == PLC_OK);
-    CHECK((ram[0] == PLC_TWI_OK) && (ram[1] == 0x99) && (fake_twi_tx[0] == 0x42));
-    fake_twi_status = PLC_TWI_NACK;
-    CHECK(plc_vm_cycle() == PLC_ERR_PARM);              // TwiGet after a NACK
-    CHECK(ram[0] == PLC_TWI_NACK);
+    CHECK(CALLED("twi_start 0 0x48 1 1") && (fake_twi_tx[0] == 0x42));
+    CHECK((ram[0] == TWI_ST(0x48, PLC_TWI_RDY, 1, 1)) && (ram[1] == 0x99));
 
-    // UART: ram[0] = UartGet(2) on an empty buffer
+    // The same on bus 1 with 40-43: the bus is the first argument
+    setup();
+    {
+        const uint8_t init[] = { LDI_U1, 18, LDI_U1, 18, API, 30, LDI_U1, 19, LDI_U1, 19, API, 30, RET };
+        const uint8_t cycle[] = { LDI_S4, 0x48, 0, 1, 1, LDI_1, API, 40, LDI_U1, 0x42, LDI_1, API, 42,
+                                  LDI_1, API, 41, STM_S4_C16, 0, 0, LDI_1, API, 43, STM_S4_C16, 1, 0, RET };
+        LOAD(init, cycle);
+    }
+    fake_twi_rx[0] = 0x98;
+    CHECK(plc_vm_cycle() == PLC_OK);
+    CHECK(plc_vm_cycle() == PLC_OK);
+    CHECK(CALLED("twi_start 1 0x48 1 1"));
+    CHECK((ram[0] == TWI_ST(0x48, PLC_TWI_RDY, 1, 1)) && (ram[1] == 0x98));
+
+    // TWI0 functions without bus 0 configured
+    setup();
+    {
+        const uint8_t init[] = { RET };
+        const uint8_t cycle[] = { API, 2, STM_S4_C16, 0, 0, RET };
+        LOAD(init, cycle);
+    }
+    plc_vm_cycle();
+    CHECK(plc_vm_cycle() == PLC_ERR_PARM);
+
+    // UART as X13: ram[0] = UartGetByte(2) on an empty buffer, ram[1] = UartBytesToRead(2),
+    // ram[2] = UartPutByte(2, 0x41)
     setup();
     {
         const uint8_t init[] = { LDI_0, LDI_U1, 23, LDI_U1, 4, API, 31,
                                  LDI_0, LDI_U1, 24, LDI_U1, 5, API, 31, RET };
-        const uint8_t cycle[] = { LDI_U1, 2, API, 51, STM_S4_C16, 0, 0, RET };
+        const uint8_t cycle[] = { LDI_U1, 2, API, 22, STM_S4_C16, 0, 0, LDI_U1, 2, API, 21, STM_S4_C16, 1, 0,
+                                  LDI_U1, 0x41, LDI_U1, 2, API, 23, STM_S4_C16, 2, 0, RET };
         LOAD(init, cycle);
     }
     CHECK(plc_vm_cycle() == PLC_OK);
-    CHECK((plc_vm_cycle() == PLC_OK) && (ram[0] == 0xFFFFFFFF));
+    CHECK((plc_vm_cycle() == PLC_OK) && (ram[0] == 0xFFFFFFFF) && (ram[1] == 0) && (ram[2] == 1));
+    CHECK((fake_uart_tx_len[2] == 1) && (fake_uart_tx[2][0] == 0x41));
 
     // Errors stop the program
     setup();
