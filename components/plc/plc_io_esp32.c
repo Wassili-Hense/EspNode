@@ -23,6 +23,8 @@
 
 #include "plc_io_hw.h"
 
+static const char *TAG = "plc_io";
+
 #define ADC_DEFAULT_VREF    1100                    // mV, when eFuse has no calibration
 #define PWM_MODE            LEDC_HIGH_SPEED_MODE    // ESP32: clock source per timer
 #define PWM_APB_HZ          80000000
@@ -156,6 +158,12 @@ bool plc_hw_adc_open(uint32_t pin, int atten)
         const adc_oneshot_unit_init_cfg_t cfg = { .unit_id = ADC_UNIT_1 };
         if (adc_oneshot_new_unit(&cfg, &s.adc) != ESP_OK) {
             return false;
+        }
+        // Without calibration in eFuse the reference may be 1000..1200 mV instead of 1100
+        static const char *const source[] = { "eFuse Vref", "eFuse two point", "default Vref, no eFuse" };
+        adc_cali_line_fitting_efuse_val_t val;
+        if ((adc_cali_scheme_line_fitting_check_efuse(&val) == ESP_OK) && ((unsigned)val < 3)) {
+            ESP_LOGI(TAG, "ADC calibration: %s", source[val]);
         }
     }
     if (s.cali[atten] == NULL) {
