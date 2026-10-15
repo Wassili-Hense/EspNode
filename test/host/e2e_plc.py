@@ -15,7 +15,7 @@ crc16 = g.plc_crc16
 class Plc:
     def __init__(self, h):
         self.h = h
-        self.tid = next(t for t, n in h.gw.topics.items() if n == 'pa0')
+        self.tid = next(t for t, n in h.gw.topics.items() if n == 'pa1')
 
     def responses(self, since):
         return [m[7:] for t, d, m in self.h.log
@@ -57,7 +57,7 @@ t0 = time.time()
 h = Harness('plc')
 
 ok = h.run(120_000, until=lambda: h.status() == 'CONNECT')
-check(ok and 'pa0' in h.gw.topics.values(), f'connected, control object registered: {h.gw.topics}')
+check(ok and 'pa1' in h.gw.topics.values(), f'connected, control object registered: {h.gw.topics}')
 plc = Plc(h)
 h.run(500)
 first = plc.responses(0)
@@ -175,7 +175,7 @@ IO_B = program_init(OUT2_INIT, [0x00] + OUT2_CYCLE)            # Same pin setup,
 IO_NONE = program_init([0xFF], [0xFF])
 IO_BAD = program_init([0x3C, 5, 0x3C, 6, 0xC6, 30, 0xFF], [0xFF])     # ConfigPin1(6, OUT): flash pin
 
-plc.tid = max(t for t, n in h.gw.topics.items() if n == 'pa0')     # Registered again after reboot
+plc.tid = max(t for t, n in h.gw.topics.items() if n == 'pa1')     # Registered again after reboot
 hw()
 r = plc.upload(IO_A, stack_bottom=3)
 check(r == bytes([2, 0]), f'IO program started: {r}')

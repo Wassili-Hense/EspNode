@@ -5,16 +5,18 @@ EspNode программируется лограммой: блоки ввода
 загружается по протоколу DevicePLC. Прошивка готова; ниже — что нужно в Enviriot (`D:\Projects\WebUI`).
 Контракт прошивки — [plc-api.md](plc-api.md).
 
-## 1. DeviceLogram
+## 1. Объект `pa1` и DeviceLogram
 
-Новый тип устройства-лограммы, исполняемой на узле. Сейчас объект управления — `pa0`, протокол DevicePLC
-не меняется.
+EspNode регистрирует объект управления PLC как `pa1`, а не `pa0`, как X13: программы для EspNode (ввод-вывод
+через `ConfigPin`, TWI 40–43, часы) и для X13 различаются, и Enviriot должен их различать. Протокол тот же,
+что у `pa0` (DevicePLC).
 
-- Из `pa0` (DevicePLC) переходят build, run, start и stop; загрузка — как сейчас: `CRC_REQ` → `STOP_REQ`
-  → блоки `WRITE_REQ` по 32 байта → `SET_STACK_REQ` → `START_REQ`.
-- Позже EspNode будет публиковать `pa1`, чтобы отличать DeviceLogram от DevicePLC. Тогда
-  `MsDevice.cs:797` и `MsDevice.cs:868` (сравнение `tag == "pa0"`) нужно расширить, например
-  `tag.StartsWith("pa")`.
+- [x] Сделано (Enviriot `86370d1`): DevicePLC создаётся и для `pa1`, компилятор знает узел и отказывает в
+  функциях другого (`UartInit` — только X13, `ConfigPin*`, `TwiBus*` — только EspNode), переменные
+  ввода-вывода на EspNode не регистрируются.
+- Новый тип устройства-лограммы, исполняемой на узле: из DevicePLC переходят build, run, start и stop;
+  загрузка — как сейчас: `CRC_REQ` → `STOP_REQ` → блоки `WRITE_REQ` по 32 байта → `SET_STACK_REQ` →
+  `START_REQ`.
 - Собственные блоки DeviceLogram: ввод-вывод из описания устройства, вычислительные блоки, драйверы
   устройств TWI. Описание устройства (xst) — после формата DeviceLogram; пока выбор пинов — по таблице
   возможностей в [plc-api.md](plc-api.md#пины-esp32).
@@ -50,15 +52,15 @@ EspNode программируется лограммой: блоки ввода
   | `TwiControl`, `TwiStatus`, `TwiPutByte`, `TwiGetByte` | 1–4 | | | уже есть, шина 0 |
   | `NowSeconds`, `Today` | 9, 10 | | | уже есть |
   | `UartBytesToRead`, `UartGetByte`, `UartPutByte` | 21–23 | | | уже есть |
-  | `ConfigPin1` | 30 | 2 | 0 | новое |
-  | `ConfigPin2` | 31 | 3 | 0 | новое |
-  | `TwiBusControl` (bus, ctrl) | 40 | 2 | 0 | новое, имена — на ваше усмотрение |
-  | `TwiBusStatus` (bus) | 41 | 1 | 1 | новое |
-  | `TwiBusPutByte` (bus, data) | 42 | 2 | 0 | новое |
-  | `TwiBusGetByte` (bus) | 43 | 1 | 1 | новое |
+  | `ConfigPin1` | 30 | 2 | 0 | есть (`7d8e25b`), только EspNode |
+  | `ConfigPin2` | 31 | 3 | 0 | есть, только EspNode |
+  | `TwiBusControl` (bus, ctrl) | 40 | 2 | 0 | есть, только EspNode |
+  | `TwiBusStatus` (bus) | 41 | 1 | 1 | есть, только EspNode |
+  | `TwiBusPutByte` (bus, data) | 42 | 2 | 0 | есть, только EspNode |
+  | `TwiBusGetByte` (bus) | 43 | 1 | 1 | есть, только EspNode |
 
-  `UartInit` (20) на EspNode не работает (`0x88`): порт открывает `ConfigPin`; для программ EspNode его
-  лучше не предлагать. Часы для `NowSeconds`/`Today` Enviriot уже выставляет через `0xFF07`, как узлам X13.
+  `UartInit` (20) на EspNode нет: порт открывает `ConfigPin`; компилятор для `pa1` его не принимает.
+  Часы для `NowSeconds`/`Today` Enviriot выставляет через `0xFF07`, как узлам X13.
 - `IN`/`OUT`: операнд кодируется как сейчас (`Addr`: `place << 24 | type << 16 | base`), `base` —
   номер GPIO. Сейчас в JS это переменные с именами тегов X13, объявленные без значения (`var Op2;`), —
   работает, но буквы тега ничего не значат для EspNode, а у тегов-чисел нельзя задать начальное значение.

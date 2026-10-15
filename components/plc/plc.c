@@ -28,7 +28,8 @@ _Static_assert(PRG_SIZE <= 0x10000, "Program addresses are 16 bit");
 _Static_assert((PRG_SIZE % 4096) == 0, "Program memory is stored in 4K flash sectors");
 _Static_assert(RW_WORDS <= RAM_WORDS, "Merker area exceeds RAM");
 
-// Control protocol, object "pa0". Request: [cmd] [args], response: [cmd + 1] [status] [data]
+// Control protocol, object "pa1" (X13: "pa0", the same protocol).
+// Request: [cmd] [args], response: [cmd + 1] [status] [data]
 enum {
     CMD_IDLE                = 0x00,
     CMD_START_REQ           = 0x01,
@@ -222,7 +223,7 @@ static void control(void)
     }
 }
 
-// Control object "pa0": the gateway writes a request, the response is published
+// Control object "pa1": the gateway writes a request, the response is published
 static uint8_t ctrl_read(const od_subidx_t *sidx, uint8_t *len, uint8_t *buf)
 {
     (void)sidx;
@@ -380,7 +381,8 @@ static uint8_t merker_attach(od_entry_t *entry)
 
 static void provider_init(void)
 {
-    const od_subidx_t ctrl = { .place = OD_PLACE_PLC_CTRL, .type = OD_TYPE_ARRAY, .base = 0 };
+    // "pa1", not "pa0" as X13: the gateway tells EspNode programs (IO, TWI, float) from X13 ones
+    const od_subidx_t ctrl = { .place = OD_PLACE_PLC_CTRL, .type = OD_TYPE_ARRAY, .base = 1 };
 
     od_entry_t *entry = od_add_object(&ctrl);
     if (entry == NULL) {

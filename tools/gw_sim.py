@@ -48,8 +48,8 @@ FL_TOPICID_NORM, FL_TOPICID_PREDEF = 0x00, 0x01
 
 RC_NAMES = {0: 'accepted', 1: 'congestion', 2: 'invalid topic id', 3: 'not supported'}
 
-# PLC control object "pa0": request [cmd] [args], response [cmd + 1] [status] [data]
-PLC_TOPIC = 'pa0'
+# PLC control object "pa1" (X13: "pa0"): request [cmd] [args], response [cmd + 1] [status] [data]
+PLC_TOPIC = 'pa1'
 PLC_CMDS = {0: 'IDLE', 1: 'START_REQ', 2: 'START_RESP', 3: 'STOP_REQ', 4: 'STOP_RESP',
             5: 'CRC_REQ', 6: 'CRC_RESP', 7: 'WRITE_REQ', 8: 'WRITE_RESP',
             11: 'SET_STACK_REQ', 12: 'SET_STACK_RESP'}
@@ -459,7 +459,7 @@ def selftest() -> None:
     assert sent[-1] == bytes([2, PINGRESP])
 
     # PLC control object registered by the node
-    gw.handle(msg(REGISTER, p16(0) + p16(10) + b'pa0'))
+    gw.handle(msg(REGISTER, p16(0) + p16(10) + b'pa1'))
     tid = u16(sent[-1], 2)
     run_command(gw, 'plc start')
     assert sent[-1][1] == PUBLISH and u16(sent[-1], 3) == tid and sent[-1][7:] == b'\x01'

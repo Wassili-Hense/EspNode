@@ -7,7 +7,7 @@ PLC: пины, ШИМ, АЦП, ЦАП, счётчики, шины TWI и UART.
 
 - MQTT-SN поверх UART, совместимый со шлюзом X13/Enviriot (кадр `[len][SLIP-escaped][0xC0]`,
   DHCP-адресация 0x43/0x44, predefined-объекты 0xFFxx).
-- PLC: байткод компилятора Enviriot с float-командами, загрузка через объект `pa0`, переменные —
+- PLC: байткод компилятора Enviriot с float-командами, загрузка через объект `pa1` (протокол `pa0` X13), переменные —
   мерке́ры `M…`, ввод-вывод — `ConfigPin` и опкоды `IN`/`OUT` по номеру GPIO
   ([docs/plc-api.md](docs/plc-api.md)). Что нужно в Enviriot — [docs/enviriot-todo.md](docs/enviriot-todo.md).
 
@@ -52,7 +52,7 @@ python tools/gw_sim.py --selftest
 python tools/gw_sim.py COM5          # USB-UART адаптер на GPIO17/16
 ```
 
-На чистом узле: DHCPREQ → SEARCHGW → CONNECT `E1S10_10` → REGISTER `pa0` → PUBLISH 0xFF07 (часы),
+На чистом узле: DHCPREQ → SEARCHGW → CONNECT `E1S10_10` → REGISTER `pa1` → PUBLISH 0xFF07 (часы),
 0xFFC0 `E1S10.400`, 0xFFC1 → SUBSCRIBE `#` → симулятор, как Enviriot, выставляет часы узла → состояние PLC.
 Команды: `name kitchen` — имя узла,
 `plc start|stop|crc`, `plc upload <файл.bin> [дно стека]` — загрузить программу, `reg 50 Md0` — мерке́р.

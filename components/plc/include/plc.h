@@ -1,7 +1,7 @@
 /*
  * X13 PLC: runs programs compiled by Enviriot.
  *
- * Objects: "pa0" - control (program upload, start/stop, error reports), "M<type><n>" - merkers,
+ * Objects: "pa1" - control (program upload, start/stop, error reports), "M<type><n>" - merkers,
  * variables of the program shared with the gateway. Pins and buses are set up by the program,
  * see docs/plc-api.md.
  *
