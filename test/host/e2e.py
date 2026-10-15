@@ -29,20 +29,26 @@ ok = h.run(120_000, until=lambda: h.status() == 'CONNECT')
 check(ok, f'connected after {h.ms / 1000:.1f} s simulated')
 seq = h.types()
 print('   node:', ' '.join(seq))
-check(seq[:7] == ['DHCPREQ', 'SEARCHGW', 'CONNECT', 'REGISTER', 'PUBLISH', 'PUBLISH', 'SUBSCRIBE'], 'message sequence')
+check(seq[:9] == ['DHCPREQ', 'SEARCHGW', 'CONNECT', 'REGISTER', 'PUBLISH', 'PUBLISH', 'PUBLISH', 'SUBSCRIBE',
+                  'PUBACK'], 'message sequence')
 check(h.gw.client_id == 'E1S10_10', f'client id {h.gw.client_id!r}')
 pubs = [m for m in h.node_msgs() if m[1] == g.PUBLISH]
-check(pubs[0][2] == 0x31 and g.u16(pubs[0], 3) == 0xFFC0 and pubs[0][7:] == b'E1S10.400',
+check(pubs[0][2] == 0x31 and g.u16(pubs[0], 3) == 0xFF07 and len(pubs[0]) == 13 and
+      pubs[0][10:13] == b'\x01\x81\x70',     # Day 1, Thursday | January, 70
+      f'clock published first, not set yet: 1970-01-01: {pubs[0][7:].hex(" ")}')
+check(pubs[1][2] == 0x31 and g.u16(pubs[1], 3) == 0xFFC0 and pubs[1][7:] == b'E1S10.400',
       'device type published QoS1|RETAIN|PREDEF')
-check(g.u16(pubs[1], 3) == 0xFFC1 and pubs[1][7:] == b'\x10', 'PHY1 address published')
+check(g.u16(pubs[2], 3) == 0xFFC1 and pubs[2][7:] == b'\x10', 'PHY1 address published')
+clock_set = [m for m in h.node_msgs() if m[1] == g.PUBACK and g.u16(m, 2) == 0xFF07]
+check(clock_set and clock_set[0][6] == 0, 'clock set by the gateway after the session')
 dhcp = h.node_msgs()[0]
 check(dhcp == bytes([6, g.DHCPREQ, 1]) + dhcp[3:5] + b'\x01', f'DHCPREQ format {dhcp.hex(" ")}')
 
 # 2. Set node name from the gateway
 mark = h.ms
 h.gw.publish(0xFF00, b'kitchen', predef=True)
-acks = [m for m in h.node_msgs(mark) if m[1] == g.PUBACK]
-check(len(acks) == 1 and acks[0][6] == 0 and g.u16(acks[0], 2) == 0xFF00, 'name accepted (PUBACK rc 0)')
+acks = [m for m in h.node_msgs(mark) if m[1] == g.PUBACK and g.u16(m, 2) == 0xFF00]
+check(len(acks) == 1 and acks[0][6] == 0, 'name accepted (PUBACK rc 0)')
 
 # Duplicate (DUP + same msg id) is acknowledged but not applied twice
 h.gw.publish(0x1234, b'\x01')

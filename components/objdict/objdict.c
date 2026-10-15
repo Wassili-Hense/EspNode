@@ -13,6 +13,7 @@
 
 #include "mqttsn_client.h"
 #include "objdict.h"
+#include "od_clock.h"
 #include "od_pack.h"
 #include "od_storage.h"
 
@@ -23,7 +24,7 @@ static const char *TAG = "objdict";
 #define SESSION_DONE        0xFFFF      // Session position: device info sent, subscribe next
 #define NO_RECORD           (-1)
 
-_Static_assert(OD_MAX < OD_ID_DEVICE_TYPE, "Session position overlaps predefined ids");
+_Static_assert(OD_MAX < OD_ID_RTC, "Session position overlaps predefined ids");
 
 static struct {
     const char                 *device_type;
@@ -108,6 +109,31 @@ static uint8_t read_device_type(const od_subidx_t *sidx, uint8_t *len, uint8_t *
     return MQTTSN_RC_ACCEPTED;
 }
 
+// X13 RTC: Enviriot learns from the publication at connect that the node keeps time, and writes
+// its local time when the node is more than 2 s off, then every hour
+static uint8_t read_rtc(const od_subidx_t *sidx, uint8_t *len, uint8_t *buf)
+{
+    (void)sidx;
+    if (*len < OD_CLOCK_BCD_SIZE) {
+        return MQTTSN_RC_REJ_NOT_SUPP;
+    }
+    od_clock_get_bcd(buf);
+    *len = OD_CLOCK_BCD_SIZE;
+    return MQTTSN_RC_ACCEPTED;
+}
+
+static uint8_t write_rtc(const od_subidx_t *sidx, uint8_t len, const uint8_t *buf)
+{
+    (void)sidx;
+    if ((len != OD_CLOCK_BCD_SIZE) || !od_clock_set_bcd(buf)) {
+        return MQTTSN_RC_REJ_NOT_SUPP;
+    }
+    od_clock_t c;
+    od_clock_now(&c);
+    ESP_LOGI(TAG, "clock: %04u-%02u-%02u %02u:%02u:%02u", c.year, c.month, c.day, c.hour, c.min, c.sec);
+    return MQTTSN_RC_ACCEPTED;
+}
+
 // X13 PLC nodes disable polling of inputs used by the PLC program. Inputs are
 // owned by the PLC here, there is nothing to mute.
 static uint8_t write_in_mute(const od_subidx_t *sidx, uint8_t len, const uint8_t *buf)
@@ -120,6 +146,7 @@ static uint8_t write_in_mute(const od_subidx_t *sidx, uint8_t len, const uint8_t
 
 static const od_entry_t s_predef[] = {
     { { OD_PLACE_EEMEM,   OD_TYPE_STRING, 0 }, OD_ID_NODE_NAME,   read_node_name,   write_node_name, NULL },
+    { { OD_PLACE_EEMEM,   OD_TYPE_ARRAY,  0 }, OD_ID_RTC,         read_rtc,         write_rtc,       NULL },
     { { OD_PLACE_EEMEM,   OD_TYPE_ARRAY,  0 }, OD_ID_IN_MUTE,     NULL,             write_in_mute,   NULL },
     { { OD_PLACE_EEMEM,   OD_TYPE_UINT8,  0 }, OD_ID_NODE_ID,     read_node_id,     write_node_id,   NULL },
     { { OD_PLACE_EEMEM,   OD_TYPE_UINT8,  0 }, OD_ID_GATE_ID,     read_gate_id,     write_gate_id,   NULL },
@@ -252,7 +279,10 @@ static void session_step(void)
             s.idx++;
         }
     } else if (s.idx != SESSION_DONE) {
-        if (s.idx < OD_ID_DEVICE_TYPE) {
+        // Device info: RTC, then the objects from the device type on (X13: objRTC, objDeviceTyp)
+        if (s.idx < OD_ID_RTC) {
+            s.idx = OD_ID_RTC;
+        } else if ((s.idx > OD_ID_RTC) && (s.idx < OD_ID_DEVICE_TYPE)) {
             s.idx = OD_ID_DEVICE_TYPE;
         }
         if (mqttsn_client_can_send()) {

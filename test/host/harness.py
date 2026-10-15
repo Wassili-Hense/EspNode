@@ -2,6 +2,7 @@
 import os
 import subprocess
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -11,6 +12,7 @@ import gw_sim as g  # noqa: E402,F401
 BUILD = HERE / 'build'
 NODE = BUILD / ('host_node.exe' if os.name == 'nt' else 'host_node')
 TICK_MS = 10
+CLOCK = datetime(2026, 10, 15, 12, 0, 0)    # Gateway local time at simulated 0 ms
 
 
 class Harness:
@@ -22,7 +24,8 @@ class Harness:
         self.ms = 0
         self.log = []                   # (ms, 'node'|'gw', msg)
         self.gw_online = True
-        self.gw = g.Gateway(self.to_node, node_addr=0x10, gw_id=1, log=lambda s: None)
+        self.gw = g.Gateway(self.to_node, node_addr=0x10, gw_id=1, log=lambda s: None,
+                            now=lambda: CLOCK + timedelta(milliseconds=self.ms))
         self.after_tick = []            # Messages to the node after the next tick
         self.before_tick = []           # Messages to the node before the next tick
 

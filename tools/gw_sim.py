@@ -14,6 +14,7 @@ import queue
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -71,7 +72,29 @@ def plc_crc16(data: bytes, crc: int = 0xFFFF) -> int:
 
 # Predefined objects of the node, decoded as strings
 PREDEF_STRINGS = {0xFF00: 'NodeName', 0xFFC0: 'DeviceType'}
-PREDEF_NAMES = {0xFF10: 'NodeId', 0xFF14: 'GateId', 0xFFC1: 'PHY1addr', **PREDEF_STRINGS}
+PREDEF_NAMES = {0xFF07: 'RTC', 0xFF10: 'NodeId', 0xFF14: 'GateId', 0xFFC1: 'PHY1addr', **PREDEF_STRINGS}
+
+# Node clock, X13 RTC object: sec, min, hour, day, weekday << 5 | month, year % 100, BCD
+RTC_TOPIC = 0xFF07
+RTC_MAX_DIFF = 2.0          # s, Enviriot MsDevice: larger difference -> set the node clock
+
+
+def rtc_encode(t: datetime) -> bytes:
+    def bcd(v: int) -> int:
+        return ((v // 10) << 4) | (v % 10)
+    return bytes([bcd(t.second), bcd(t.minute), bcd(t.hour), bcd(t.day),
+                  (t.isoweekday() << 5) | bcd(t.month), bcd(t.year % 100)])
+
+
+def rtc_decode(data: bytes, century: int) -> datetime | None:
+    def dec(b: int) -> int:
+        return (b >> 4) * 10 + (b & 0x0F)
+    try:
+        hour = dec(data[2] & 0x3F) + (12 if data[2] & 0x40 else 0)
+        return datetime(century + dec(data[5]), dec(data[4] & 0x1F), dec(data[3] & 0x3F),
+                        hour, dec(data[1] & 0x7F), dec(data[0] & 0x7F))
+    except (ValueError, IndexError):
+        return None
 
 
 def encode_frame(msg: bytes) -> bytes:
@@ -164,8 +187,9 @@ class Gateway:
     """Gateway side of the protocol; send() gets complete MQTT-SN messages."""
 
     def __init__(self, send: Callable[[bytes], None], node_addr: int = 0x10, gw_id: int = 1,
-                 log: Callable[[str], None] = print) -> None:
+                 log: Callable[[str], None] = print, now: Callable[[], datetime] = datetime.now) -> None:
         self.send_raw = send
+        self.now = now                          # Local time the node clock is set to
         self.node_addr = node_addr
         self.gw_id = gw_id
         self.log = log
@@ -175,6 +199,7 @@ class Gateway:
         self.client_id: str | None = None
         self.subscribed = False
         self.plc_rx: queue.Queue[bytes] = queue.Queue()     # PLC responses, filled by handle()
+        self.rtc_set = False                    # Set the node clock when its session is done
 
     def _send(self, m: bytes) -> None:
         self.log(f'  -> {MSG_NAMES.get(m[1], hex(m[1]))} {m.hex(" ")}')
@@ -224,15 +249,31 @@ class Gateway:
                 self.plc_rx.put(bytes(data))
             if (flags & FL_QOS_MASK) == FL_QOS1:
                 self._send(msg(PUBACK, p16(topic_id) + p16(msg_id) + b'\x00'))
+            if (flags & FL_TOPICID_MASK) == FL_TOPICID_PREDEF and topic_id == RTC_TOPIC and len(data) == 6:
+                self._check_rtc(data)
         elif t == SUBSCRIBE:
             flags, msg_id, topic = m[2], u16(m, 3), m[5:].decode('utf-8', errors='replace')
             self.subscribed = True
             self.log(f'    "{topic}"')
             self._send(msg(SUBACK, bytes([flags & FL_QOS_MASK]) + p16(0) + p16(msg_id) + b'\x00'))
+            if self.rtc_set:                    # The node takes PUBLISH from now on
+                self.rtc_set = False
+                now = self.now()
+                self.log(f'    set node clock to {now:%Y-%m-%d %H:%M:%S}')
+                self.publish(RTC_TOPIC, rtc_encode(now), predef=True)
         elif t == PINGREQ:
             self._send(msg(PINGRESP))
         elif t in (REGACK, PUBACK) and len(m) >= 7:
             self.log(f'    topic {u16(m, 2)}: {RC_NAMES.get(m[6], hex(m[6]))}')
+
+    def _check_rtc(self, data: bytes) -> None:
+        """As Enviriot MsDevice: the node publishes its clock at connect, a clock more than 2 s off is set
+        later, from MsDevice.Tick (Enviriot also sets it every hour)."""
+        now = self.now()
+        node = rtc_decode(data, now.year // 100 * 100)
+        self.log(f'    node clock {node}')
+        if node is None or abs((node - now).total_seconds()) > RTC_MAX_DIFF:
+            self.rtc_set = True
 
     # Commands to the node
 
@@ -448,6 +489,22 @@ def selftest() -> None:
     assert gw.plc_upload(prg, 4).startswith('40 bytes') and mem[:40] == prg
     assert reqs == [5, 3, 7, 7, 11, 1], reqs
     assert gw.plc_upload(prg, 4).startswith('program unchanged')
+
+    # Node clock: set when more than 2 s off
+    clock = datetime(2026, 10, 15, 12, 34, 56)
+    gw.now = lambda: clock
+    assert rtc_encode(clock) == bytes([0x56, 0x34, 0x12, 0x15, (4 << 5) | 0x10, 0x26])
+    sent.clear()
+    gw.handle(msg(PUBLISH, bytes([0x30 | FL_TOPICID_PREDEF]) + p16(RTC_TOPIC) + p16(11)
+                  + bytes([0x00, 0x00, 0x00, 0x01, (4 << 5) | 0x01, 0x70])))
+    assert [m[1] for m in sent] == [PUBACK]
+    gw.handle(msg(SUBSCRIBE, bytes([0x20]) + p16(12) + b'#'))
+    assert sent[-1] == msg(PUBLISH, bytes([FL_QOS1 | FL_TOPICID_PREDEF]) + p16(RTC_TOPIC) + p16(gw.msg_id)
+                           + rtc_encode(clock)), sent[-1].hex()
+    sent.clear()
+    gw.handle(msg(PUBLISH, bytes([0x30 | FL_TOPICID_PREDEF]) + p16(RTC_TOPIC) + p16(13) + rtc_encode(clock)))
+    gw.handle(msg(SUBSCRIBE, bytes([0x20]) + p16(14) + b'#'))
+    assert [m[1] for m in sent] == [PUBACK, SUBACK]
 
     print('selftest passed')
 

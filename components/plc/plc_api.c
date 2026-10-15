@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 
 #include "mqttsn_client.h"
+#include "objdict.h"
 #include "plc_api.h"
 #include "plc_io.h"
 
@@ -85,6 +86,17 @@ plc_status_t plc_api_call(uint8_t func)
     case PLC_API_RANDOM:
         push(esp_random());
         return PLC_RUN;
+    case PLC_API_NOW_SECONDS:
+    case PLC_API_TODAY: {
+        od_clock_t c;
+        od_clock_now(&c);
+        if (func == PLC_API_NOW_SECONDS) {
+            push((uint32_t)c.hour * 3600 + (uint32_t)c.min * 60 + c.sec);
+        } else {            // Weekday 1 - Monday .. 7 - Sunday
+            push(((uint32_t)(c.year % 100) << 24) | ((uint32_t)c.month << 16) | ((uint32_t)c.day << 8) | c.wday);
+        }
+        return PLC_RUN;
+    }
 
     case PLC_API_UART_AVAIL:
         if (!args(a, 1)) {

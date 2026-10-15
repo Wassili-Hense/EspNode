@@ -51,6 +51,7 @@ extern "C" {
 
 // Predefined objects (MQTTSN_FL_TOPICID_PREDEF)
 #define OD_ID_NODE_NAME         0xFF00  // String, ClientId
+#define OD_ID_RTC               0xFF07  // Array, local time from the gateway, see od_clock_now()
 #define OD_ID_IN_MUTE           0xFF09  // Array, write only, sent by the gateway to PLC nodes
 #define OD_ID_NODE_ID           0xFF10  // UInt8, own address, 0xFF - DHCP
 #define OD_ID_GATE_ID           0xFF14  // UInt8, gateway address, 0xFF - search
@@ -101,6 +102,20 @@ typedef struct {
     const od_provider_t *const *providers;
     size_t                      n_providers;
 } od_config_t;
+
+// Wall clock: local time the gateway writes to OD_ID_RTC (Enviriot: at connect and every hour).
+// Until then it counts from 1970-01-01 00:00:00 at boot.
+typedef struct {
+    uint16_t    year;
+    uint8_t     month;      // 1..12
+    uint8_t     day;        // 1..31
+    uint8_t     wday;       // 1 - Monday .. 7 - Sunday
+    uint8_t     hour;
+    uint8_t     min;
+    uint8_t     sec;
+} od_clock_t;
+
+void od_clock_now(od_clock_t *now);
 
 // Requires nvs_flash_init()
 esp_err_t od_init(const od_config_t *cfg);

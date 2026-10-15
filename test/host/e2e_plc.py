@@ -205,6 +205,27 @@ h.run(500, until=lambda: any(x[0] == 4 for x in plc.responses(mark)))
 rep = [x for x in plc.responses(mark) if x[0] == 4]
 check(rep and rep[0][1] == 0x8A, f'ConfigPin on a flash pin stops with 0x8A: {rep[0].hex(" ") if rep else None}')
 
+# Clock: NowSeconds() and Today() follow the gateway time, set at connect
+CLOCK_PRG = program(0xC6, 9, 0xBB, 3, 0, 0xC6, 10, 0xBB, 4, 0, 0xFF)    # Md3 = NowSeconds(), Md4 = Today()
+r = plc.upload(CLOCK_PRG, stack_bottom=5)
+check(r == bytes([2, 0]), 'clock program started')
+h.gw.register(71, 'Md3')
+h.gw.register(72, 'Md4')
+h.run(2000)
+
+
+def last_value(topic):
+    vals = [int.from_bytes(m[7:], 'little', signed=True) for t, d, m in h.log
+            if d == 'node' and m[1] == g.PUBLISH and g.u16(m, 3) == topic]
+    return vals[-1] if vals else None
+
+
+now = hn.CLOCK + hn.timedelta(milliseconds=h.ms)
+secs = now.hour * 3600 + now.minute * 60 + now.second
+today = (now.year % 100) << 24 | now.month << 16 | now.day << 8 | now.isoweekday()
+check(last_value(71) is not None and abs(last_value(71) - secs) <= 1, f'NowSeconds() = {last_value(71)}, gateway {secs}')
+check(last_value(72) == today, f'Today() = {last_value(72)}, gateway {today:#x}')
+
 h.cmd('quit')
 print(f'{"FAILED" if hn.failed else "ALL PASSED"} in {time.time() - t0:.1f} s real time')
 sys.exit(1 if hn.failed else 0)

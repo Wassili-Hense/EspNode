@@ -48,6 +48,7 @@ EspNode программируется лограммой: блоки ввода
   | Имя | `Addr` | `pIn` | `pOut` | |
   |---|---|---|---|---|
   | `TwiControl`, `TwiStatus`, `TwiPutByte`, `TwiGetByte` | 1–4 | | | уже есть, шина 0 |
+  | `NowSeconds`, `Today` | 9, 10 | | | уже есть |
   | `UartBytesToRead`, `UartGetByte`, `UartPutByte` | 21–23 | | | уже есть |
   | `ConfigPin1` | 30 | 2 | 0 | новое |
   | `ConfigPin2` | 31 | 3 | 0 | новое |
@@ -56,8 +57,8 @@ EspNode программируется лограммой: блоки ввода
   | `TwiBusPutByte` (bus, data) | 42 | 2 | 0 | новое |
   | `TwiBusGetByte` (bus) | 43 | 1 | 1 | новое |
 
-  `UartInit` (20) на EspNode не работает (`0x88`): порт открывает `ConfigPin`. Для программ EspNode его,
-  `NowSeconds` и `Today` (9, 10) лучше не предлагать.
+  `UartInit` (20) на EspNode не работает (`0x88`): порт открывает `ConfigPin`; для программ EspNode его
+  лучше не предлагать. Часы для `NowSeconds`/`Today` Enviriot уже выставляет через `0xFF07`, как узлам X13.
 - `IN`/`OUT`: операнд кодируется как сейчас (`Addr`: `place << 24 | type << 16 | base`), `base` —
   номер GPIO, `place` и `type` — 0. Нужен способ сослаться на пин из кода блока, например
   `Merker { type = INPUT/OUTPUT, Addr = gpio }` для ввода и вывода блока.

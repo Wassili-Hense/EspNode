@@ -5,6 +5,7 @@
 
 #include "fake_hw.h"
 #include "mqttsn_client.h"
+#include "od_clock.h"
 #include "plc_api.h"
 #include "plc_io.h"
 #include "plc_vm.h"
@@ -666,6 +667,20 @@ static void test_program(void)
     CHECK(plc_vm_cycle() == PLC_OK);
     CHECK((plc_vm_cycle() == PLC_OK) && (ram[0] == 0xFFFFFFFF) && (ram[1] == 0) && (ram[2] == 1));
     CHECK((fake_uart_tx_len[2] == 1) && (fake_uart_tx[2][0] == 0x41));
+
+    // Clock: ram[0] = NowSeconds(), ram[1] = Today(); 1970-01-01 (Thursday) until the gateway sets it
+    setup();
+    {
+        const uint8_t init[] = { RET };
+        const uint8_t cycle[] = { API, 9, STM_S4_C16, 0, 0, API, 10, STM_S4_C16, 1, 0, RET };
+        LOAD(init, cycle);
+    }
+    fake_now_ms = 3723 * 1000;
+    plc_vm_cycle();
+    CHECK((plc_vm_cycle() == PLC_OK) && (ram[0] == 3723) && (ram[1] == ((70u << 24) | (1 << 16) | (1 << 8) | 4)));
+    CHECK(od_clock_set_bcd((const uint8_t[]){ 0x56, 0x34, 0x12, 0x15, 0x10, 0x26 }));   // 2026-10-15 12:34:56
+    CHECK((plc_vm_cycle() == PLC_OK) && (ram[0] == 12 * 3600 + 34 * 60 + 56) &&
+          (ram[1] == ((26u << 24) | (10 << 16) | (15 << 8) | 4)));
 
     // Errors stop the program
     setup();

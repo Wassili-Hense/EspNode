@@ -17,6 +17,8 @@ enum {
     PLC_API_MILLISECONDS    = 6,    // int getMilliseconds()
     PLC_API_SECONDS         = 7,    // int getSeconds()
     PLC_API_RANDOM          = 8,    // int Random()
+    PLC_API_NOW_SECONDS     = 9,    // int NowSeconds(): seconds since 00:00:00, local time
+    PLC_API_TODAY           = 10,   // int Today(): year % 100 << 24 | month << 16 | day << 8 | weekday
     PLC_API_UART_AVAIL      = 21,   // int UartBytesToRead(int port), as X13
     PLC_API_UART_GET        = 22,   // int UartGetByte(int port)
     PLC_API_UART_PUT        = 23,   // bool UartPutByte(int port, int data)

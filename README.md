@@ -52,8 +52,9 @@ python tools/gw_sim.py --selftest
 python tools/gw_sim.py COM5          # USB-UART адаптер на GPIO17/16
 ```
 
-На чистом узле: DHCPREQ → SEARCHGW → CONNECT `E1S10_10` → REGISTER `pa0` → PUBLISH 0xFFC0
-`E1S10.400`, 0xFFC1 → SUBSCRIBE `#` → состояние PLC. Команды: `name kitchen` — имя узла,
+На чистом узле: DHCPREQ → SEARCHGW → CONNECT `E1S10_10` → REGISTER `pa0` → PUBLISH 0xFF07 (часы),
+0xFFC0 `E1S10.400`, 0xFFC1 → SUBSCRIBE `#` → симулятор, как Enviriot, выставляет часы узла → состояние PLC.
+Команды: `name kitchen` — имя узла,
 `plc start|stop|crc`, `plc upload <файл.bin> [дно стека]` — загрузить программу, `reg 50 Md0` — мерке́р.
 
 ## Тесты

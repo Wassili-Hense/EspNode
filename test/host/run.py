@@ -1,6 +1,6 @@
 """Build and run the host tests.
 
-    python test/host/run.py [test ...]      tests: vm, io, e2e, e2e_plc (default: all)
+    python test/host/run.py [test ...]      tests: vm, io, clock, e2e, e2e_plc (default: all)
 
 C compiler: $CC, default "gcc"; any gcc or clang, e.g. CC=clang or CC="zig cc".
 """
@@ -20,10 +20,11 @@ INCLUDE = [HERE / 'stubs', HERE] + [COMP / d for d in (
     'serial_phy', 'serial_phy/include')]
 FLAGS = ['-std=c11', '-g', '-O1', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter']
 
-PLC = [COMP / 'plc' / f for f in ('plc_vm.c', 'plc_api.c', 'plc_io.c')]
+PLC = [COMP / 'plc' / f for f in ('plc_vm.c', 'plc_api.c', 'plc_io.c')] + [COMP / 'objdict/od_clock.c']
 BINARIES = {
     'test_vm': [HERE / 'test_vm.c', COMP / 'plc/plc_vm.c'],
     'test_io': [HERE / 'test_io.c', HERE / 'fake_hw.c'] + PLC,
+    'test_clock': [HERE / 'test_clock.c', COMP / 'objdict/od_clock.c'],
     'host_node': [HERE / 'host_node.c', HERE / 'fake_hw.c', HERE / 'fake_store.c', COMP / 'plc/plc.c']
     + PLC + [COMP / f for f in ('mqttsn/mqttsn_client.c', 'mqttsn/mqttsn_msg.c', 'objdict/objdict.c',
                                 'objdict/od_pack.c', 'objdict/od_storage.c', 'serial_phy/serial_frame.c')],
@@ -31,6 +32,7 @@ BINARIES = {
 TESTS = {                               # name: (binary, command)
     'vm': ('test_vm', [str(BUILD / ('test_vm' + EXE))]),
     'io': ('test_io', [str(BUILD / ('test_io' + EXE))]),
+    'clock': ('test_clock', [str(BUILD / ('test_clock' + EXE))]),
     'e2e': ('host_node', [sys.executable, str(HERE / 'e2e.py')]),
     'e2e_plc': ('host_node', [sys.executable, str(HERE / 'e2e_plc.py')]),
 }
