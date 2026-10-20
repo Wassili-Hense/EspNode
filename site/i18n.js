@@ -58,8 +58,8 @@ export const STRINGS = {
         'progress.file': 'Файл {n} из {count}: {name}',
         'progress.erase': '{name} — стирание',
         'progress.reset': 'Перезапуск узла…',
-        'done.install': 'Готово: прошивка и настройки записаны и проверены (MD5), узел перезапущен. Порт свободен — можно подключать Enviriot.',
-        'done.settings': 'Готово: настройки записаны и проверены, узел перезапущен. Порт свободен.',
+        'done.install': 'Готово: прошивка и настройки записаны и проверены (MD5). Нажмите на плате кнопку Reset (EN или RST): перезапуск со страницы срабатывает не на всех платах. Порт свободен — можно подключать Enviriot.',
+        'done.settings': 'Готово: настройки записаны и проверены. Нажмите на плате кнопку Reset (EN или RST), чтобы узел их применил. Порт свободен.',
 
         'err.cdn': 'Не удалось загрузить esptool-js с cdn.jsdelivr.net: {error}',
         'err.chip': 'Это {chip}, а прошивка — для ESP32.',
@@ -142,8 +142,8 @@ export const STRINGS = {
         'progress.file': 'File {n} of {count}: {name}',
         'progress.erase': '{name}: erase',
         'progress.reset': 'Restarting the node…',
-        'done.install': 'Done: firmware and settings written and verified (MD5), the node restarted. The port is free for Enviriot.',
-        'done.settings': 'Done: settings written and verified, the node restarted. The port is free.',
+        'done.install': 'Done: firmware and settings written and verified (MD5). Press the Reset button on the board (EN or RST): the restart from the page does not work on every board. The port is free for Enviriot.',
+        'done.settings': 'Done: settings written and verified. Press the Reset button on the board (EN or RST) for the node to apply them. The port is free.',
 
         'err.cdn': 'Could not load esptool-js from cdn.jsdelivr.net: {error}',
         'err.chip': 'This is {chip}, the firmware is for ESP32.',
