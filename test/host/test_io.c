@@ -598,11 +598,11 @@ static void test_program(void)
 {
     uint32_t v;
 
-    // ConfigPin1(2, OUT); ConfigPin2(4, IN, 0); cycle: OUT 2 = IN 4. The compiler pushes the last
+    // ConfigPin(2, OUT, 0); ConfigPin(4, IN, 0); cycle: OUT 2 = IN 4. The compiler pushes the last
     // argument first; place and type of the IN/OUT operand are not checked.
     setup();
     {
-        const uint8_t init[] = { LDI_U1, 5, LDI_U1, 2, API, 30,
+        const uint8_t init[] = { LDI_0, LDI_U1, 5, LDI_U1, 2, API, 31,
                                  LDI_0, LDI_1, LDI_U1, 4, API, 31, RET };
         const uint8_t cycle[] = { IN, 'I', 'x', 4, 0, OUT, 'O', 'y', 2, 0, RET };
         LOAD(init, cycle);
@@ -617,7 +617,7 @@ static void test_program(void)
     // TWI as X13, bus 0: TwiControl(0x01010048), TwiPutByte(0x42), ram[0] = TwiStatus(), ram[1] = TwiGetByte()
     setup();
     {
-        const uint8_t init[] = { LDI_U1, 16, LDI_U1, 21, API, 30,
+        const uint8_t init[] = { LDI_0, LDI_U1, 16, LDI_U1, 21, API, 31,
                                  LDI_U1, 100, LDI_U1, 17, LDI_U1, 22, API, 31, RET };
         const uint8_t cycle[] = { LDI_S4, 0x48, 0, 1, 1, API, 1, LDI_U1, 0x42, API, 3,
                                   API, 2, STM_S4_C16, 0, 0, API, 4, STM_S4_C16, 1, 0, RET };
@@ -633,7 +633,8 @@ static void test_program(void)
     // The same on bus 1 with 40-43: the bus is the first argument
     setup();
     {
-        const uint8_t init[] = { LDI_U1, 18, LDI_U1, 18, API, 30, LDI_U1, 19, LDI_U1, 19, API, 30, RET };
+        const uint8_t init[] = { LDI_0, LDI_U1, 18, LDI_U1, 18, API, 31,
+                                 LDI_0, LDI_U1, 19, LDI_U1, 19, API, 31, RET };
         const uint8_t cycle[] = { LDI_S4, 0x48, 0, 1, 1, LDI_1, API, 40, LDI_U1, 0x42, LDI_1, API, 42,
                                   LDI_1, API, 41, STM_S4_C16, 0, 0, LDI_1, API, 43, STM_S4_C16, 1, 0, RET };
         LOAD(init, cycle);
@@ -685,11 +686,19 @@ static void test_program(void)
     // Errors stop the program
     setup();
     {
-        const uint8_t init[] = { LDI_U1, 5, LDI_U1, 6, API, 30, RET };     // Flash pin
+        const uint8_t init[] = { LDI_0, LDI_U1, 5, LDI_U1, 6, API, 31, RET };      // Flash pin
         const uint8_t cycle[] = { RET };
         LOAD(init, cycle);
     }
     CHECK(plc_vm_cycle() == PLC_ERR_PARM);
+    setup();
+    {
+        const uint8_t init[] = { LDI_U1, 5, LDI_U1, 2, API, 30, RET };     // ConfigPin1 is gone
+        const uint8_t cycle[] = { RET };
+        LOAD(init, cycle);
+    }
+    CHECK(plc_vm_cycle() == PLC_ERR_UNK_API);
+    CHECK(!CALLED("gpio_output"));
     setup();
     {
         const uint8_t init[] = { RET };
@@ -699,11 +708,11 @@ static void test_program(void)
     plc_vm_cycle();
     CHECK(plc_vm_cycle() == PLC_ERR_PARM);
 
-    // Missing arguments: stack error, no side effects (args 0, 0 would release GPIO0)
+    // Missing arguments: stack error, no side effects (args 0, 0, 0 would release GPIO0)
     setup();
     CFG(0, OUT, 0);
     {
-        const uint8_t init[] = { API, 30, RET };
+        const uint8_t init[] = { API, 31, RET };
         const uint8_t cycle[] = { RET };
         LOAD(init, cycle);
     }

@@ -168,12 +168,12 @@ def level(pin):
     return int(h.cmd(f'level {pin}')[0].split()[1])
 
 
-OUT2_INIT = [0x3C, 5, 0x3C, 2, 0xC6, 30, 0xFF]                 # ConfigPin1(2, OUT)
+OUT2_INIT = [0x38, 0x3C, 5, 0x3C, 2, 0xC6, 31, 0xFF]           # ConfigPin(2, OUT, 0)
 OUT2_CYCLE = [0x9B, 2, 0, 0xC1, 0, 0, 2, 0, 0xFF]              # OUT 2 = Md2
 IO_A = program_init(OUT2_INIT, OUT2_CYCLE)
 IO_B = program_init(OUT2_INIT, [0x00] + OUT2_CYCLE)            # Same pin setup, other code
 IO_NONE = program_init([0xFF], [0xFF])
-IO_BAD = program_init([0x3C, 5, 0x3C, 6, 0xC6, 30, 0xFF], [0xFF])     # ConfigPin1(6, OUT): flash pin
+IO_BAD = program_init([0x38, 0x3C, 5, 0x3C, 6, 0xC6, 31, 0xFF], [0xFF])   # ConfigPin(6, OUT, 0): flash pin
 
 plc.tid = max(t for t, n in h.gw.topics.items() if n == 'pa1')     # Registered again after reboot
 hw()

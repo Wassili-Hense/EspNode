@@ -18,7 +18,7 @@ JZ, JNZ, JMP, RET = 0xF1, 0xF2, 0xF3, 0xFF
 
 # API functions
 MILLIS, SECONDS = 6, 7
-CONFIG_PIN1, CONFIG_PIN2 = 30, 31
+CONFIG_PIN = 31                        # ConfigPin(pin, mode, option)
 TWI_CONTROL, TWI_STATUS = 1, 2        # Bus 0, as X13
 UART_AVAIL, UART_GET, UART_PUT = 21, 22, 23
 TWI_RDY, TWI_FAILED = 0x10 << 8, 0xE0 << 8     # Status bits: access << 8
@@ -93,7 +93,7 @@ def image(init, cycle):
 
 def blink(period_ms):
     """GPIO2 (devkit LED) toggles every period_ms; Md0 = its state."""
-    init = Asm().call(CONFIG_PIN1, 2, OUT_)
+    init = Asm().call(CONFIG_PIN, 2, OUT_, 0)
     cycle = Asm().call(MILLIS).ldi(period_ms).op(DIV).ldi(1).op(AND).io(OUT, 2).io(IN, 2).st(0)
     return image(init, cycle)
 
@@ -101,8 +101,8 @@ def blink(period_ms):
 def pwm_count():
     """PWM 100 Hz 50 % on GPIO4, counter of rising edges on GPIO5 (jumper 4-5), input with pull-up
     on GPIO18. Md0 = count, Md1 = GPIO18, Md2 written by the gateway -> sets the count."""
-    init = Asm().call(CONFIG_PIN2, 4, PWM, 100).call(CONFIG_PIN2, 5, CNT_RISE, 1000) \
-        .call(CONFIG_PIN2, 18, IN_PU, 20).ldi(0xFFFFFFFF).st(2)
+    init = Asm().call(CONFIG_PIN, 4, PWM, 100).call(CONFIG_PIN, 5, CNT_RISE, 1000) \
+        .call(CONFIG_PIN, 18, IN_PU, 20).ldi(0xFFFFFFFF).st(2)
     cycle = Asm().ldi(32768).io(OUT, 4) \
         .ld(2).ldi(0xFFFFFFFF).op(CEQ).jump(JNZ, 'read') \
         .ld(2).io(OUT, 5).ldi(0xFFFFFFFF).st(2) \
@@ -112,7 +112,7 @@ def pwm_count():
 
 def adc_dac():
     """DAC GPIO25 = Md1 (0..255, written by the gateway), Md0 = GPIO34 in mV, 12 dB (jumper 25-34)."""
-    init = Asm().call(CONFIG_PIN1, 25, DAC).call(CONFIG_PIN2, 34, ANALOG, 3)
+    init = Asm().call(CONFIG_PIN, 25, DAC, 0).call(CONFIG_PIN, 34, ANALOG, 3)
     cycle = Asm().ld(1).io(OUT, 25).io(IN, 34).st(0)
     return image(init, cycle)
 
@@ -121,7 +121,7 @@ def twi_scan():
     """Probes the addresses 0x08..0x77 one by one, bus 0 on SDA 21 / SCL 22, 100 kHz, without waiting:
     TwiControl(address) starts a probe, the next cycles poll TwiStatus().
     Md0 = last address found, Md2 = devices found by the last full pass, Md1 = address, Md3 = count."""
-    init = Asm().call(CONFIG_PIN1, 21, TWI0_SDA).call(CONFIG_PIN2, 22, TWI0_SCL, 100).ldi(8).st(1)
+    init = Asm().call(CONFIG_PIN, 21, TWI0_SDA, 0).call(CONFIG_PIN, 22, TWI0_SCL, 100).ldi(8).st(1)
     cycle = Asm().op(API, TWI_STATUS).op(DUP).jump(JNZ, 'check') \
         .op(DROP).ld(1).op(API, TWI_CONTROL).jump(JMP, 'end') \
         .label('check').op(DUP).ldi(TWI_RDY).op(AND).jump(JZ, 'failed') \
@@ -139,7 +139,7 @@ def uart_loop():
     UartPutByte, reads it back when UartBytesToRead reports it (a cycle after it arrived).
     Md0 = last byte received, Md1 = result of UartPutByte, Md2 = bytes received, Md3 = second of the
     last send."""
-    init = Asm().call(CONFIG_PIN2, 4, UART2_TX, 9600).call(CONFIG_PIN2, 5, UART2_RX, 0)
+    init = Asm().call(CONFIG_PIN, 4, UART2_TX, 9600).call(CONFIG_PIN, 5, UART2_RX, 0)
     cycle = Asm().call(SECONDS).ld(3).op(CEQ).jump(JNZ, 'rx') \
         .call(SECONDS).st(3).ld(3).ldi(0xFF).op(AND).ldi(2).op(API, UART_PUT).st(1) \
         .label('rx').call(UART_AVAIL, 2).jump(JZ, 'end') \
@@ -149,15 +149,15 @@ def uart_loop():
 
 
 def err_flash():
-    """ConfigPin1(6, OUT): flash pin -> stop 0x8A."""
-    return image(Asm().call(CONFIG_PIN1, 6, OUT_), Asm())
+    """ConfigPin(6, OUT, 0): flash pin -> stop 0x8A."""
+    return image(Asm().call(CONFIG_PIN, 6, OUT_, 0), Asm())
 
 
 def err_pwm9():
     """Nine PWM pins at one frequency, eight channels -> stop 0x89."""
     init = Asm()
     for pin in (2, 4, 5, 13, 14, 15, 18, 19, 21):
-        init.call(CONFIG_PIN2, pin, PWM, 1000)
+        init.call(CONFIG_PIN, pin, PWM, 1000)
     return image(init, Asm())
 
 

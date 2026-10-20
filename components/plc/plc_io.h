@@ -1,5 +1,5 @@
 /*
- * PLC IO: pins configured by the program (ConfigPin1/2 in the init block), read and written in the
+ * PLC IO: pins configured by the program (ConfigPin in the init block), read and written in the
  * cycle with the IN/OUT opcodes, buses by the TWI/UART API functions. A channel is a GPIO number.
  *
  * Not thread-safe: runs in the PLC task. Mode numbers are part of the contract with Enviriot,

@@ -12,7 +12,7 @@ var Cp4;
 class Io {
   constructor() {
     this.ok = 1;
-    ConfigPin1(2, 5);           // OUT; before the counter, so that setting it up gives no edge
+    ConfigPin2(2, 5, 0);        // OUT; before the counter, so that setting it up gives no edge
     ConfigPin2(4, 15, 0);       // CNT_BOTH
   }
 }

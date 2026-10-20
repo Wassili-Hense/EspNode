@@ -11,7 +11,7 @@ var t0 = new Int32(0);
 class Twi {
   constructor() {
     this.ok = 1;
-    ConfigPin1(21, 16);         // TWI0_SDA
+    ConfigPin2(21, 16, 0);      // TWI0_SDA
     ConfigPin2(22, 17, 100);    // TWI0_SCL, 100 kHz (HDC1080 - up to 400)
   }
 }

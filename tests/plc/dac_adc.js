@@ -22,7 +22,7 @@ var Ae34;
 class Io {
   constructor() {
     this.ok = 1;
-    ConfigPin1(25, 10);         // DAC
+    ConfigPin2(25, 10, 0);      // DAC
     ConfigPin2(34, 9, 3);       // ANALOG, 12 dB
   }
 }

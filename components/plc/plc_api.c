@@ -114,12 +114,7 @@ plc_status_t plc_api_call(uint8_t func)
         }
         return result(plc_io_uart_put(a[0], a[1], &val), val);
 
-    case PLC_API_CONFIG_PIN1:
-        if (!args(a, 2)) {
-            return PLC_ERR_OFR_SP;
-        }
-        return plc_io_config(a[0], a[1], 0);
-    case PLC_API_CONFIG_PIN2:
+    case PLC_API_CONFIG_PIN:
         if (!args(a, 3)) {
             return PLC_ERR_OFR_SP;
         }

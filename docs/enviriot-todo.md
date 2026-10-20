@@ -27,7 +27,7 @@ EspNode регистрирует объект управления PLC как `p
 
 ## 2. Блоки ввода-вывода
 
-Конструктор блока настраивает пин (`ConfigPin1`/`ConfigPin2`, попадает в init программы), цикл
+Конструктор блока настраивает пин (`ConfigPin2`, функция 31, попадает в init программы), цикл
 выполняет ввод-вывод (`IN`/`OUT`). Параметры блока — константы времени компиляции.
 
 - [x] Блоки DigitalInput … Counter из таблицы — один встроенный блок `Pin` (Enviriot `a6de46a`), режим
@@ -39,9 +39,9 @@ EspNode регистрирует объект управления PLC как `p
 | Блок | Параметры (константы) | Конструктор | Цикл |
 |---|---|---|---|
 | DigitalInput | pin, подтяжка (нет / к питанию / к земле), инверсия, дребезг мс | `ConfigPin2(pin, IN…, debounce)` | выход = `IN pin` |
-| DigitalOutput | pin, инверсия, открытый сток | `ConfigPin1(pin, OUT…)` | `OUT pin` = вход |
+| DigitalOutput | pin, инверсия, открытый сток | `ConfigPin2(pin, OUT…, 0)` | `OUT pin` = вход |
 | AnalogInput | pin, ослабление, период | `ConfigPin2(pin, ANALOG, atten)` | выход = `IN pin`, мВ, раз в период |
-| AnalogOutput | pin (25/26) | `ConfigPin1(pin, DAC)` | `OUT pin` = вход 0…255 |
+| AnalogOutput | pin (25/26) | `ConfigPin2(pin, DAC, 0)` | `OUT pin` = вход 0…255 |
 | Pwm | pin, частота, инверсия | `ConfigPin2(pin, PWM…, freq)` | `OUT pin` = скважность 0…65535 |
 | Counter | pin, фронты, фильтр нс | `ConfigPin2(pin, CNT_…, filter)` | выход = `IN pin`; вход сброса → `OUT pin, 0` |
 | TwiBus | шина, SDA, SCL, кГц | два `ConfigPin` | — |
@@ -62,8 +62,8 @@ EspNode регистрирует объект управления PLC как `p
   | `TwiControl`, `TwiStatus`, `TwiPutByte`, `TwiGetByte` | 1–4 | | | уже есть, шина 0 |
   | `NowSeconds`, `Today` | 9, 10 | | | уже есть |
   | `UartBytesToRead`, `UartGetByte`, `UartPutByte` | 21–23 | | | уже есть |
-  | `ConfigPin1` | 30 | 2 | 0 | есть (`7d8e25b`), только EspNode |
-  | `ConfigPin2` | 31 | 3 | 0 | есть, только EspNode |
+  | `ConfigPin1` | 30 | 2 | 0 | **убрать**: в прошивке функции 30 больше нет, вызов — `0x88` |
+  | `ConfigPin2` | 31 | 3 | 0 | есть, только EspNode; в прошивке — `ConfigPin` |
   | `TwiBusControl` (bus, ctrl) | 40 | 2 | 0 | есть, только EspNode |
   | `TwiBusStatus` (bus) | 41 | 1 | 1 | есть, только EspNode |
   | `TwiBusPutByte` (bus, data) | 42 | 2 | 0 | есть, только EspNode |

@@ -14,7 +14,7 @@ var Ip27;                       // X13 tag: the compiler turns it into IN, base 
 cycles++;
 
 if(mode == 1) {
-  ConfigPin1(6, 5);             // OUT
+  ConfigPin2(6, 5, 0);          // OUT
 }
 if(mode == 2) {
   ConfigPin2(2, 11, 1000);      // PWM, 1000 Hz
@@ -31,6 +31,6 @@ if(mode == 3) {
   x = Ip27;
 }
 if(mode == 4) {
-  ConfigPin1(13, 5);            // OUT
-  ConfigPin1(13, 1);            // IN
+  ConfigPin2(13, 5, 0);         // OUT
+  ConfigPin2(13, 1, 0);         // IN
 }
