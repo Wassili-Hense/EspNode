@@ -175,11 +175,13 @@ int main(void)
         const uint8_t code[] = { LDI_U1, 2, LPM_U1, 32, 0, TO0 };
         load(code, sizeof(code));
         prg[32] = 0x11; prg[33] = 0x22; prg[34] = 0x83;
-        expect("lpm u1", plc_vm_cycle(), PLC_OK, ram[0], 0x83);
+        plc_status_t st = plc_vm_cycle();               // Before reading ram[0]: argument order
+        expect("lpm u1", st, PLC_OK, ram[0], 0x83);
         const uint8_t code2[] = { LDI_U1, 2, LPM_S1, 32, 0, TO0 };
         load(code2, sizeof(code2));
         prg[34] = 0x83;
-        expect("lpm s1", plc_vm_cycle(), PLC_OK, ram[0], 0xFFFFFF83);
+        st = plc_vm_cycle();
+        expect("lpm s1", st, PLC_OK, ram[0], 0xFFFFFF83);
     }
     // API: arguments are popped in their order, the compiler pushes the last one first
     api_calls = 0;

@@ -23,11 +23,12 @@ static bool args(uint32_t *arg, int n)
     return plc_vm_status() == PLC_RUN;
 }
 
-// Push the result of a function that succeeded
-static plc_status_t result(plc_status_t stat, uint32_t val)
+// Push the result of a function that succeeded. The value by pointer: read after the call that
+// writes it, the order of evaluating arguments is unspecified (gcc on x86-64 goes right to left)
+static plc_status_t result(plc_status_t stat, const uint32_t *val)
 {
     if (stat == PLC_RUN) {
-        push(val);
+        push(*val);
     }
     return stat;
 }
@@ -49,11 +50,11 @@ static plc_status_t twi_call(uint8_t func, bool with_bus)
     case PLC_API_TWI_CONTROL:
         return plc_io_twi_control(bus, arg);
     case PLC_API_TWI_STATUS:
-        return result(plc_io_twi_status(bus, &val), val);
+        return result(plc_io_twi_status(bus, &val), &val);
     case PLC_API_TWI_PUT_BYTE:
         return plc_io_twi_put(bus, arg);
     default:
-        return result(plc_io_twi_get(bus, &val), val);
+        return result(plc_io_twi_get(bus, &val), &val);
     }
 }
 
@@ -102,17 +103,17 @@ plc_status_t plc_api_call(uint8_t func)
         if (!args(a, 1)) {
             return PLC_ERR_OFR_SP;
         }
-        return result(plc_io_uart_avail(a[0], &val), val);
+        return result(plc_io_uart_avail(a[0], &val), &val);
     case PLC_API_UART_GET:
         if (!args(a, 1)) {
             return PLC_ERR_OFR_SP;
         }
-        return result(plc_io_uart_get(a[0], &val), val);
+        return result(plc_io_uart_get(a[0], &val), &val);
     case PLC_API_UART_PUT:
         if (!args(a, 2)) {
             return PLC_ERR_OFR_SP;
         }
-        return result(plc_io_uart_put(a[0], a[1], &val), val);
+        return result(plc_io_uart_put(a[0], a[1], &val), &val);
 
     case PLC_API_CONFIG_PIN:
         if (!args(a, 3)) {
