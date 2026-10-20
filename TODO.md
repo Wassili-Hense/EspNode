@@ -59,8 +59,8 @@
 - [x] Версия: `PROJECT_VER` — `git describe` ESP-IDF; тег `vX.Y.Z` → версия в типе устройства `XYZ`
   (`main/CMakeLists.txt`), без такого тега — `CONFIG_ESPNODE_SW_VERSION`.
 - [x] `build` зелёный на `dev` (2026-10-20): прошивка и хостовые тесты под gcc.
-- [ ] После merge в `main` — `pages` публикует `https://wassili-hense.github.io/EspNode/`, `manifest.json`
-  открывается.
+- [x] После merge в `main` — `pages` публикует `https://wassili-hense.github.io/EspNode/`, `manifest.json`
+  открывается (2026-10-20).
 
 ## 5. Страница установки (`site/`)
 
