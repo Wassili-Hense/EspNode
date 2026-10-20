@@ -31,6 +31,10 @@ static const char *TAG = "espnode";
 #define FLASH_PINS          0xFC0ull    // GPIO6-11
 #define DECLARER_UC         "E1"        // X13 declarer: uC family E - ESP32, subtype 1
 
+#ifndef ESPNODE_SW_VERSION              // From the git tag, main/CMakeLists.txt
+#define ESPNODE_SW_VERSION  CONFIG_ESPNODE_SW_VERSION
+#endif
+
 // A debug build may enable the console (sdkconfig.defaults: none), it must not share the UART
 #if CONFIG_ESP_CONSOLE_UART_NUM == CONFIG_ESPNODE_UART_PORT
 #error "The console uses the default MQTT-SN UART: choose another ESPNODE_UART_PORT or disable the console"
@@ -135,7 +139,7 @@ static void load_cfg(node_cfg_t *cfg)
 static const char *device_type(const node_cfg_t *cfg)
 {
     static char buf[sizeof(DECLARER_UC) + NODE_CFG_MAX_IFS + sizeof(CONFIG_ESPNODE_HW_VERSION) +
-                    sizeof(CONFIG_ESPNODE_SW_VERSION)];
+                    sizeof(ESPNODE_SW_VERSION)];
     char phy[NODE_CFG_MAX_IFS + 1] = { 0 };
 
     for (size_t i = 0; i < cfg->n_ifs; i++) {
@@ -143,7 +147,7 @@ static const char *device_type(const node_cfg_t *cfg)
         phy[i] = (itf->type == NODE_CFG_IF_WIFI) ? 'W' :
                  (itf->framing == NODE_CFG_FRAMING_RS485) ? 'M' : 'S';
     }
-    snprintf(buf, sizeof(buf), DECLARER_UC "%s" CONFIG_ESPNODE_HW_VERSION "." CONFIG_ESPNODE_SW_VERSION, phy);
+    snprintf(buf, sizeof(buf), DECLARER_UC "%s" CONFIG_ESPNODE_HW_VERSION "." ESPNODE_SW_VERSION, phy);
     return buf;
 }
 

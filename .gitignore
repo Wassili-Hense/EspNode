@@ -77,3 +77,6 @@ dependencies.lock
 __pycache__/
 .clangd
 /.vscode
+
+# Installer site assembled by tools/mkmanifest.py
+_site/

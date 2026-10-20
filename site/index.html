@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EspNode</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+  code { font-size: 0.95em; }
+  td { padding: 0.1rem 1rem 0.1rem 0; }
+</style>
+</head>
+<body>
+<h1>EspNode</h1>
+<p>Страница установки ещё в разработке. Пока здесь только прошивка последней сборки ветки <code>main</code>.</p>
+<p id="info">Загрузка manifest.json…</p>
+<table id="files"></table>
+<p><a href="https://github.com/Wassili-Hense/EspNode">Исходники на GitHub</a></p>
+<script>
+  // Check of the publication (TODO.md §4), the installer page replaces it (§5)
+  fetch('manifest.json').then(r => r.json()).then(m => {
+    document.getElementById('info').textContent =
+      `Версия ${m.version}, ${m.date}, ${m.chip}, flash ${m.flash.flash_size}.`;
+    const t = document.getElementById('files');
+    for (const f of m.files) {
+      const a = document.createElement('a');
+      a.href = f.path;
+      a.textContent = f.path;
+      const row = t.insertRow();
+      row.insertCell().textContent = '0x' + f.offset.toString(16);
+      row.insertCell().append(a);
+    }
+  }).catch(e => { document.getElementById('info').textContent = 'manifest.json: ' + e; });
+</script>
+</body>
+</html>

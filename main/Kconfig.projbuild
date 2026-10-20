@@ -46,5 +46,8 @@ menu "EspNode"
     config ESPNODE_SW_VERSION
         string "Software version"
         default "400"
+        help
+            Three characters after '.' of the device type. A git tag vX.Y.Z replaces it with "XYZ"
+            (main/CMakeLists.txt).
 
 endmenu

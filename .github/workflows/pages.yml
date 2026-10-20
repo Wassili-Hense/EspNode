@@ -1,0 +1,43 @@
+# Installer page on GitHub Pages: every push to main, or by hand (Actions -> pages -> Run workflow).
+# Once in the repository settings: Pages -> Source -> GitHub Actions.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware
+          path: build
+      - name: Page, firmware, manifest.json
+        run: python3 tools/mkmanifest.py build _site
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v5

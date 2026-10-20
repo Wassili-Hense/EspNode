@@ -1,0 +1,41 @@
+# Firmware and host tests on every push and pull request; main is built by pages.yml, which calls this one
+name: build
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0              # Tags: git describe gives the firmware version
+      - name: idf.py build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32
+          command: idf.py -B build/default build    # -B: CMakePresets.json, see README
+      - uses: actions/upload-artifact@v7
+        with:
+          name: firmware
+          if-no-files-found: error
+          path: |
+            build/default/flasher_args.json
+            build/default/project_description.json
+            build/default/bootloader/bootloader.bin
+            build/default/partition_table/partition-table.bin
+            build/default/espnode.bin
+
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 test/host/run.py

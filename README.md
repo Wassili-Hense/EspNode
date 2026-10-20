@@ -23,6 +23,8 @@ PLC: пины, ШИМ, АЦП, ЦАП, счётчики, шины TWI и UART.
 | `main` | Задача узла (тик 10 мс), применение `cfg`; значения без `cfg` — в `menuconfig → EspNode` |
 | `tools/gw_sim.py` | Симулятор шлюза X13 для проверки без X13 |
 | `tools/mkcfg.py` | Образ раздела `cfg`, пока нет страницы установки |
+| `tools/mkmanifest.py`, `site/` | Сайт страницы установки: страница, прошивка, `manifest.json` |
+| `.github/workflows` | Сборка и тесты в CI, публикация страницы на GitHub Pages |
 | `test/host` | Хостовые тесты: VM, ввод-вывод, `cfg`, сквозные MQTT-SN и PLC |
 
 ## Сборка
@@ -51,6 +53,22 @@ idf.py -B build/default -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.debu
 ESP-IDF v6.1 помечает в `sdkconfig` значения по умолчанию (`# default:`) и заменяет их значениями из
 `sdkconfig.defaults` и `sdkconfig.debug`; выбранное в `menuconfig` остаётся. Консоль и MQTT-SN на одном
 UART — ошибка сборки.
+
+Версия: тег `vX.Y.Z` даёт версию в типе устройства `E1S10.XYZ`; без такого тега — `ESPNODE_SW_VERSION`
+из `menuconfig`.
+
+## GitHub Actions и страница установки
+
+- `build` — прошивка и хостовые тесты на каждый push (кроме `main`) и pull request.
+- `pages` — на push в `main` (и вручную) собирает прошивку и публикует страницу установки
+  `https://wassili-hense.github.io/EspNode/`: `site/`, прошивку в `fw/` и `manifest.json` для страницы.
+
+Тот же сайт локально, из своей сборки (Web Serial работает и на `localhost`):
+
+```
+python tools/mkmanifest.py build/default _site
+python -m http.server -d _site
+```
 
 ## Подключение
 

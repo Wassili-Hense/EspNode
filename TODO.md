@@ -46,22 +46,26 @@
 
 ## 4. GitHub Actions
 
-- [ ] `build.yml` — на push и pull request: `idf.py -B build/default build` (`espressif/esp-idf-ci-action`,
-  ESP-IDF v6.1, esp32; `-B` из-за `CMakePresets.json`), артефакты: `bootloader.bin`, `partition-table.bin`,
-  `espnode.bin`, `flasher_args.json`.
-- [ ] Запуск хостовых тестов в CI: `python test/host/run.py` (gcc и Python на ubuntu).
-- [ ] Тест генератора `cfg` на JS (node в CI) на том же примере, что и в прошивке.
-- [ ] Ветки: разработка — в `dev`, в `main` — то, что публикуется.
-- [ ] `pages.yml` — на каждый push в `main` и вручную: сборка, сайт = страница + прошивка + `manifest.json` (файлы и
-  адреса из `flasher_args.json`, версия, дата), публикация через `actions/upload-pages-artifact` и
-  `actions/deploy-pages`. Однократно в настройках репозитория: Pages → Source → GitHub Actions.
-- [ ] Версия: последний тег `v*` (`git describe`) → `PROJECT_VER` и версия в типе устройства
-  (`CONFIG_ESPNODE_SW_VERSION`, три символа).
+- [x] `build.yml` — на push (кроме `main`) и pull request: `idf.py -B build/default build`
+  (`espressif/esp-idf-ci-action`, ESP-IDF v6.1, esp32; `-B` из-за `CMakePresets.json`), артефакт `firmware`:
+  `bootloader.bin`, `partition-table.bin`, `espnode.bin`, `flasher_args.json`, `project_description.json`.
+- [x] Запуск хостовых тестов в CI: `python3 test/host/run.py` (gcc и Python на ubuntu).
+- [ ] Тест генератора `cfg` на JS (node в CI) на том же примере, что и в прошивке — вместе с генератором (п. 5).
+- [x] Ветки: разработка — в `dev`, в `main` — то, что публикуется.
+- [x] `pages.yml` — на каждый push в `main` и вручную: сборка (вызывает `build.yml`), сайт = `site/` + прошивка
+  в `fw/` + `manifest.json` (`tools/mkmanifest.py`: файлы и адреса из `flasher_args.json`, разделы из собранной
+  таблицы, версия, дата), публикация через `actions/upload-pages-artifact` и `actions/deploy-pages`. Пока в
+  `site/` временная страница: версия и файлы из `manifest.json`.
+- [x] Версия: `PROJECT_VER` — `git describe` ESP-IDF; тег `vX.Y.Z` → версия в типе устройства `XYZ`
+  (`main/CMakeLists.txt`), без такого тега — `CONFIG_ESPNODE_SW_VERSION`.
+- [ ] Проверить в GitHub: `build` зелёный на `dev` (хостовые тесты впервые собираются gcc, а не clang);
+  после merge в `main` — `pages` публикует `https://wassili-hense.github.io/EspNode/`, `manifest.json` открывается.
 
 ## 5. Страница установки (`site/`)
 
-- [ ] Статическая страница, ES-модули без сборки; `esptool-js` (Apache-2.0) фиксированной версии лежит в
-  `site/lib`, а не берётся с CDN.
+- [ ] Статическая страница, ES-модули без сборки; `esptool-js` (Apache-2.0) — с CDN, точная версия и
+  `integrity`. Если с CDN будут проблемы (блокировки), `pages.yml` при сборке скачает ту же версию из npm,
+  сверит хеш и положит рядом со страницей.
 - [ ] Проверка Web Serial; иначе — сообщение: нужен Chrome / Edge / Opera на компьютере.
 - [ ] Подключение: вход в загрузчик, проверка чипа (ESP32) и размера flash (4 МБ, иначе предупреждение),
   показ MAC.
