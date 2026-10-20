@@ -22,8 +22,8 @@ PLC: пины, ШИМ, АЦП, ЦАП, счётчики, шины TWI и UART.
 | `components/node_cfg` | Раздел `cfg`: разбор и проверка настроек узла со страницы установки |
 | `main` | Задача узла (тик 10 мс), применение `cfg`; значения без `cfg` — в `menuconfig → EspNode` |
 | `tools/gw_sim.py` | Симулятор шлюза X13 для проверки без X13 |
-| `tools/mkcfg.py` | Образ раздела `cfg`, пока нет страницы установки |
-| `tools/mkmanifest.py`, `site/` | Сайт страницы установки: страница, прошивка, `manifest.json` |
+| `tools/mkcfg.py` | Образ раздела `cfg` из командной строки |
+| `site/`, `tools/mkmanifest.py` | Страница установки; сайт: страница, прошивка, `manifest.json` |
 | `.github/workflows` | Сборка и тесты в CI, публикация страницы на GitHub Pages |
 | `test/host` | Хостовые тесты: VM, ввод-вывод, `cfg`, сквозные MQTT-SN и PLC |
 
@@ -57,18 +57,34 @@ UART — ошибка сборки.
 Версия: тег `vX.Y.Z` даёт версию в типе устройства `E1S10.XYZ`; без такого тега — `ESPNODE_SW_VERSION`
 из `menuconfig`.
 
-## GitHub Actions и страница установки
+## Страница установки
 
-- `build` — прошивка и хостовые тесты на каждый push (кроме `main`) и pull request.
-- `pages` — на push в `main` (и вручную) собирает прошивку и публикует страницу установки
-  `https://wassili-hense.github.io/EspNode/`: `site/`, прошивку в `fw/` и `manifest.json` для страницы.
+[https://wassili-hense.github.io/EspNode/](https://wassili-hense.github.io/EspNode/) — Chrome, Edge или Opera на
+компьютере (Web Serial). Плату подключить по USB, закрыть программы, которые держат её порт, и нажать
+«Подключить». Страница показывает чип, MAC, flash и что уже стоит на плате: версию EspNode и настройки
+`cfg`, которыми заполняет поля. Дальше:
 
-Тот же сайт локально, из своей сборки (Web Serial работает и на `localhost`):
+- **«Установить»** — прошивка и `cfg`. Галочка «Стереть настройки узла и программу PLC» стоит для новой
+  платы (на ней нет ни EspNode, ни `cfg`): остатки прежней прошивки иначе запустятся как программа PLC.
+- **«Только настройки»** — один `cfg`, программа и объекты узла не трогаются.
+
+Записанное проверяется по MD5, затем узел перезапускается и порт освобождается для Enviriot. Пока доступен
+шаблон Serial (UART0 — тот же USB, 38400); WiFi и WiFi + RS-485 появятся с прошивкой, которая их умеет.
+
+Страница — ES-модули в `site/` без сборки, `esptool-js` берётся с jsDelivr с проверкой хеша. Тот же сайт
+локально, из своей сборки (Web Serial работает и на `localhost`). Для проверки сборка нужна без
+`sdkconfig.debug`: с консолью на UART0 прошивка отвергнет `cfg` шаблона Serial по умолчанию.
 
 ```
 python tools/mkmanifest.py build/default _site
 python -m http.server -d _site
 ```
+
+## GitHub Actions
+
+- `build` — прошивка, хостовые тесты и тесты модулей страницы на каждый push (кроме `main`) и pull request.
+- `pages` — на push в `main` (и вручную) собирает прошивку и публикует страницу установки: `site/`,
+  прошивку в `fw/` и `manifest.json` для страницы.
 
 ## Подключение
 
@@ -77,7 +93,7 @@ python -m http.server -d _site
 devkit: TX = GPIO1, RX = GPIO3, 38400 8N1. Пока поддерживается один интерфейс UART с кадром SLIP; WiFi,
 RS-485 и интерфейсы-шлюзы — впереди ([TODO.md](TODO.md)), `cfg` с ними применяется как испорченный.
 
-Пока страницы установки нет, `cfg` собирает `tools/mkcfg.py`:
+Для разработки `cfg` собирает и `tools/mkcfg.py`:
 
 ```
 python tools/mkcfg.py --name kitchen --uart 1,17,16,-,38400     # порт, TX, RX, DE ("-" — нет), скорость
@@ -103,6 +119,7 @@ python tools/gw_sim.py COM3          # USB devkit (UART0); отладочная 
 ## Тесты
 
 - Хостовые, на ПК без ESP-IDF: `python test/host/run.py` ([test/host](test/host/README.md)).
+- Модули страницы установки (`cfg`, MD5, описание приложения, тексты): `node test/js/test_site.mjs`.
 - Программы PLC для ручной проверки на устройстве с Enviriot — [tests/plc](tests/plc/README.md).
 - Ввод-вывод на плате, образы без компилятора Enviriot — [tests/io](tests/io/README.md).
 

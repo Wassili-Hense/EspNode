@@ -1,0 +1,225 @@
+// Texts of the installer page in Russian and English. Elements take theirs from data-i18n (text) and
+// data-i18n-placeholder; app.js asks t() for the dynamic ones and redraws them on a language change.
+
+export const STRINGS = {
+    ru: {
+        'title': 'EspNode — установка',
+        'intro': 'Прошивка узла X13 MQTT-SN для ESP32: установка и настройка из браузера через USB.',
+        'fw.version': 'Прошивка {version}, {date}',
+        'fw.error': 'Не удалось загрузить manifest.json: {error}',
+        'unsupported': 'В этом браузере нет Web Serial. Откройте страницу в Chrome, Edge или Opera на компьютере.',
+
+        'connect.title': '1. Подключение',
+        'connect.hint': 'Подключите плату ESP32 по USB и закройте программы, которые держат её порт: Enviriot, монитор порта.',
+        'connect.button': 'Подключить',
+        'connect.busy': 'Подключение…',
+        'disconnect.button': 'Отключить',
+
+        'device.chip': 'Чип',
+        'device.mac': 'MAC',
+        'device.flash': 'Flash',
+        'device.firmware': 'Прошивка на плате',
+        'device.cfg': 'Настройки на плате',
+        'dev.flash.unknown': 'размер не определён',
+        'dev.fw.espnode': 'EspNode {version} ({date}) → будет {next}',
+        'dev.fw.other': '{project} {version} — не EspNode',
+        'dev.fw.none': 'нет приложения ESP-IDF',
+        'dev.cfg.ok': 'записаны {date}',
+        'dev.cfg.none': 'нет',
+        'dev.cfg.bad': 'испорчены ({error}), узел работает по умолчанию',
+        'dev.cfg.other': 'записаны {date}; эта версия страницы их не редактирует (WiFi или RS-485)',
+
+        'settings.title': '2. Настройки узла',
+        'tpl.legend': 'Шаблон',
+        'tpl.serial': 'Serial — USB или UART',
+        'tpl.wifi': 'WiFi',
+        'tpl.wifi485': 'WiFi + RS-485',
+        'tpl.soon': 'нужна прошивка с WiFi',
+        'f.port': 'Порт UART',
+        'f.tx': 'TX',
+        'f.rx': 'RX',
+        'f.de': 'DE (RS-485)',
+        'f.de.none': 'нет',
+        'f.baud': 'Скорость, бод',
+        'f.addr': 'Адрес узла',
+        'f.addr.dhcp': 'DHCP',
+        'f.name': 'Имя узла',
+        'f.name.auto': '<тип>_<адрес>',
+        'f.hint': 'По умолчанию — UART0: это USB-порт платы, к нему потом подключается Enviriot. Адрес пустой — узел получит его от шлюза.',
+        'f.defaults': 'По умолчанию',
+        'erase.label': 'Стереть настройки узла и программу PLC (разделы nvs и plc)',
+        'erase.new': 'Плата новая: без стирания остатки прежней прошивки запустятся как программа PLC.',
+        'erase.keep': 'На плате EspNode: без стирания сохранятся имя, адрес, объекты и программа PLC.',
+        'install.button': 'Установить',
+        'settingsOnly.button': 'Только настройки',
+
+        'progress.title': '3. Запись',
+        'progress.fetch': 'Загрузка прошивки…',
+        'progress.file': 'Файл {n} из {count}: {name}',
+        'progress.erase': '{name} — стирание',
+        'progress.reset': 'Перезапуск узла…',
+        'done.install': 'Готово: прошивка и настройки записаны и проверены (MD5), узел перезапущен. Порт свободен — можно подключать Enviriot.',
+        'done.settings': 'Готово: настройки записаны и проверены, узел перезапущен. Порт свободен.',
+
+        'err.cdn': 'Не удалось загрузить esptool-js с cdn.jsdelivr.net: {error}',
+        'err.chip': 'Это {chip}, а прошивка — для ESP32.',
+        'err.flash': 'На плате {size} flash, прошивке нужно {need}: с меньшей она не запустится.',
+        'warn.flash': 'Размер flash определить не удалось, прошивке нужно {need}.',
+        'err.connect': 'Не удалось подключиться: {error}',
+        'err.write': 'Запись не удалась: {error}. Подключите плату снова.',
+        'err.lost': 'Плата отключена.',
+        'check.name': 'Имя длиннее 23 байт.',
+        'check.addr': 'Адрес узла — от 1 до 254, пусто — DHCP.',
+        'check.interfaces': 'Нет интерфейса.',
+        'check.port': 'Порт UART — 0, 1 или 2.',
+        'check.port-twice': 'Порт UART занят другим интерфейсом.',
+        'check.tx': 'TX — пин с выходом: 0–5, 12–19, 21–23, 25–27, 32, 33.',
+        'check.rx': 'RX — пин 0–5, 12–19, 21–23, 25–27, 32–39.',
+        'check.de': 'DE — пусто или пин с выходом, как у TX.',
+        'check.pin-twice': 'TX, RX и DE должны быть разными пинами.',
+        'check.baud': 'Скорость — от 1200 до 5000000 бод.',
+        'check.framing': 'Неизвестный кадр UART.',
+        'check.wifi-ssid': 'Не задан SSID.',
+        'check.wifi-twice': 'Два интерфейса WiFi.',
+
+        'log.title': 'Журнал',
+        'footer.source': 'Исходники и документация',
+        'footer.cfg': 'Формат настроек',
+    },
+    en: {
+        'title': 'EspNode installer',
+        'intro': 'X13 MQTT-SN node firmware for ESP32: install and configure it from the browser over USB.',
+        'fw.version': 'Firmware {version}, {date}',
+        'fw.error': 'Could not load manifest.json: {error}',
+        'unsupported': 'This browser has no Web Serial. Open the page in Chrome, Edge or Opera on a computer.',
+
+        'connect.title': '1. Connect',
+        'connect.hint': 'Connect the ESP32 board over USB and close the programs holding its port: Enviriot, a serial monitor.',
+        'connect.button': 'Connect',
+        'connect.busy': 'Connecting…',
+        'disconnect.button': 'Disconnect',
+
+        'device.chip': 'Chip',
+        'device.mac': 'MAC',
+        'device.flash': 'Flash',
+        'device.firmware': 'Firmware on the board',
+        'device.cfg': 'Settings on the board',
+        'dev.flash.unknown': 'size not detected',
+        'dev.fw.espnode': 'EspNode {version} ({date}) → will be {next}',
+        'dev.fw.other': '{project} {version}, not EspNode',
+        'dev.fw.none': 'no ESP-IDF application',
+        'dev.cfg.ok': 'written {date}',
+        'dev.cfg.none': 'none',
+        'dev.cfg.bad': 'damaged ({error}), the node runs on defaults',
+        'dev.cfg.other': 'written {date}; this version of the page does not edit them (WiFi or RS-485)',
+
+        'settings.title': '2. Node settings',
+        'tpl.legend': 'Template',
+        'tpl.serial': 'Serial — USB or UART',
+        'tpl.wifi': 'WiFi',
+        'tpl.wifi485': 'WiFi + RS-485',
+        'tpl.soon': 'needs firmware with WiFi',
+        'f.port': 'UART port',
+        'f.tx': 'TX',
+        'f.rx': 'RX',
+        'f.de': 'DE (RS-485)',
+        'f.de.none': 'none',
+        'f.baud': 'Baud rate',
+        'f.addr': 'Node address',
+        'f.addr.dhcp': 'DHCP',
+        'f.name': 'Node name',
+        'f.name.auto': '<type>_<address>',
+        'f.hint': 'Default: UART0, the USB port of the board that Enviriot connects to afterwards. An empty address is assigned by the gateway.',
+        'f.defaults': 'Defaults',
+        'erase.label': 'Erase the node settings and the PLC program (partitions nvs and plc)',
+        'erase.new': 'New board: without erasing, leftovers of the previous firmware run as a PLC program.',
+        'erase.keep': 'EspNode is on the board: without erasing, the name, address, objects and PLC program stay.',
+        'install.button': 'Install',
+        'settingsOnly.button': 'Settings only',
+
+        'progress.title': '3. Writing',
+        'progress.fetch': 'Downloading the firmware…',
+        'progress.file': 'File {n} of {count}: {name}',
+        'progress.erase': '{name}: erase',
+        'progress.reset': 'Restarting the node…',
+        'done.install': 'Done: firmware and settings written and verified (MD5), the node restarted. The port is free for Enviriot.',
+        'done.settings': 'Done: settings written and verified, the node restarted. The port is free.',
+
+        'err.cdn': 'Could not load esptool-js from cdn.jsdelivr.net: {error}',
+        'err.chip': 'This is {chip}, the firmware is for ESP32.',
+        'err.flash': 'The board has {size} of flash, the firmware needs {need}: it would not start with less.',
+        'warn.flash': 'Could not detect the flash size, the firmware needs {need}.',
+        'err.connect': 'Could not connect: {error}',
+        'err.write': 'Writing failed: {error}. Connect the board again.',
+        'err.lost': 'The board was disconnected.',
+        'check.name': 'The name is longer than 23 bytes.',
+        'check.addr': 'Node address: 1 to 254, empty for DHCP.',
+        'check.interfaces': 'No interface.',
+        'check.port': 'UART port: 0, 1 or 2.',
+        'check.port-twice': 'The UART port is used by another interface.',
+        'check.tx': 'TX needs an output pin: 0–5, 12–19, 21–23, 25–27, 32, 33.',
+        'check.rx': 'RX pin: 0–5, 12–19, 21–23, 25–27, 32–39.',
+        'check.de': 'DE: empty or an output pin, as for TX.',
+        'check.pin-twice': 'TX, RX and DE must be different pins.',
+        'check.baud': 'Baud rate: 1200 to 5000000.',
+        'check.framing': 'Unknown UART framing.',
+        'check.wifi-ssid': 'No SSID.',
+        'check.wifi-twice': 'Two WiFi interfaces.',
+
+        'log.title': 'Log',
+        'footer.source': 'Source and documentation',
+        'footer.cfg': 'Settings format',
+    },
+};
+
+const STORE_LANG = 'espnode.lang';
+let lang = 'en';
+const listeners = [];
+
+export function getLang() {
+    return lang;
+}
+
+// Strings with {name} placeholders
+export function t(key, vars = {}) {
+    const s = STRINGS[lang][key] ?? STRINGS.en[key] ?? key;
+    return s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
+}
+
+export function onLangChange(fn) {
+    listeners.push(fn);
+}
+
+export function setLang(l, save = true) {
+    lang = l in STRINGS ? l : 'en';
+    if (save) {
+        try {
+            localStorage.setItem(STORE_LANG, lang);
+        } catch {
+            // No storage: the choice lasts until the page is closed
+        }
+    }
+    document.documentElement.lang = lang;
+    document.title = t('title');
+    for (const el of document.querySelectorAll('[data-i18n]')) {
+        el.textContent = t(el.dataset.i18n);
+    }
+    for (const el of document.querySelectorAll('[data-i18n-placeholder]')) {
+        el.placeholder = t(el.dataset.i18nPlaceholder);
+    }
+    for (const el of document.querySelectorAll('[data-lang]')) {
+        el.setAttribute('aria-pressed', String(el.dataset.lang === lang));
+    }
+    listeners.forEach(fn => fn());
+}
+
+// Saved choice, else the language of the browser
+export function initLang() {
+    let saved = null;
+    try {
+        saved = localStorage.getItem(STORE_LANG);
+    } catch {
+        // Private window or blocked storage
+    }
+    setLang(saved ?? (navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'), false);
+}

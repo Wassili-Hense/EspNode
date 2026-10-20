@@ -4,33 +4,106 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EspNode</title>
-<style>
-  body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
-  code { font-size: 0.95em; }
-  td { padding: 0.1rem 1rem 0.1rem 0; }
-</style>
+<link rel="stylesheet" href="style.css">
+<!-- esptool-js: exact version, the browser checks the hash; app.js imports it on "Connect" -->
+<script type="importmap">
+{
+  "imports": {
+    "esptool-js": "https://cdn.jsdelivr.net/npm/esptool-js@0.7.0/bundle.js"
+  },
+  "integrity": {
+    "https://cdn.jsdelivr.net/npm/esptool-js@0.7.0/bundle.js": "sha384-gg1uFHEfaf6612Q8/ovFzAYvLxRakqrLWyMjLe8LEMBP3+2qgUvxuYxTuk87KdIb"
+  }
+}
+</script>
+<script type="module" src="app.js"></script>
 </head>
 <body>
-<h1>EspNode</h1>
-<p>Страница установки ещё в разработке. Пока здесь только прошивка последней сборки ветки <code>main</code>.</p>
-<p id="info">Загрузка manifest.json…</p>
-<table id="files"></table>
-<p><a href="https://github.com/Wassili-Hense/EspNode">Исходники на GitHub</a></p>
-<script>
-  // Check of the publication (TODO.md §4), the installer page replaces it (§5)
-  fetch('manifest.json').then(r => r.json()).then(m => {
-    document.getElementById('info').textContent =
-      `Версия ${m.version}, ${m.date}, ${m.chip}, flash ${m.flash.flash_size}.`;
-    const t = document.getElementById('files');
-    for (const f of m.files) {
-      const a = document.createElement('a');
-      a.href = f.path;
-      a.textContent = f.path;
-      const row = t.insertRow();
-      row.insertCell().textContent = '0x' + f.offset.toString(16);
-      row.insertCell().append(a);
-    }
-  }).catch(e => { document.getElementById('info').textContent = 'manifest.json: ' + e; });
-</script>
+<header>
+  <div>
+    <h1>EspNode</h1>
+    <p id="fw-version" class="muted"></p>
+  </div>
+  <div class="lang" role="group" aria-label="Language">
+    <button type="button" data-lang="ru">RU</button>
+    <button type="button" data-lang="en">EN</button>
+  </div>
+</header>
+
+<main>
+  <p data-i18n="intro"></p>
+  <p id="unsupported" class="notice error" data-i18n="unsupported" hidden></p>
+
+  <section class="card" id="step-connect">
+    <h2 data-i18n="connect.title"></h2>
+    <p class="muted" data-i18n="connect.hint"></p>
+    <div class="actions">
+      <button type="button" id="connect" class="primary" data-i18n="connect.button"></button>
+      <button type="button" id="disconnect" data-i18n="disconnect.button" hidden></button>
+    </div>
+    <dl id="device" hidden>
+      <dt data-i18n="device.chip"></dt><dd id="dev-chip"></dd>
+      <dt data-i18n="device.mac"></dt><dd id="dev-mac"></dd>
+      <dt data-i18n="device.flash"></dt><dd id="dev-flash"></dd>
+      <dt data-i18n="device.firmware"></dt><dd id="dev-fw"></dd>
+      <dt data-i18n="device.cfg"></dt><dd id="dev-cfg"></dd>
+    </dl>
+  </section>
+
+  <section class="card" id="step-settings" hidden>
+    <h2 data-i18n="settings.title"></h2>
+    <fieldset class="templates">
+      <legend data-i18n="tpl.legend"></legend>
+      <label><input type="radio" name="tpl" value="serial" checked> <span data-i18n="tpl.serial"></span></label>
+      <label class="off"><input type="radio" name="tpl" value="wifi" disabled> <span data-i18n="tpl.wifi"></span>
+        <small data-i18n="tpl.soon"></small></label>
+      <label class="off"><input type="radio" name="tpl" value="wifi485" disabled> <span data-i18n="tpl.wifi485"></span>
+        <small data-i18n="tpl.soon"></small></label>
+    </fieldset>
+
+    <div class="fields">
+      <label><span data-i18n="f.port"></span>
+        <select id="f-port"><option>0</option><option>1</option><option>2</option></select></label>
+      <label><span data-i18n="f.tx"></span><input id="f-tx" type="number" min="0" max="33" required></label>
+      <label><span data-i18n="f.rx"></span><input id="f-rx" type="number" min="0" max="39" required></label>
+      <label><span data-i18n="f.de"></span><input id="f-de" type="number" min="0" max="33" data-i18n-placeholder="f.de.none"></label>
+      <label><span data-i18n="f.baud"></span><input id="f-baud" type="number" min="1200" max="5000000" list="bauds" required></label>
+      <label><span data-i18n="f.addr"></span><input id="f-addr" type="number" min="1" max="254" data-i18n-placeholder="f.addr.dhcp"></label>
+      <label class="wide"><span data-i18n="f.name"></span><input id="f-name" maxlength="23" autocomplete="off" data-i18n-placeholder="f.name.auto"></label>
+    </div>
+    <datalist id="bauds">
+      <option value="9600"></option><option value="19200"></option><option value="38400"></option>
+      <option value="57600"></option><option value="115200"></option><option value="200000"></option>
+    </datalist>
+    <p class="muted"><span data-i18n="f.hint"></span>
+      <button type="button" id="defaults" class="link" data-i18n="f.defaults"></button></p>
+
+    <label class="check"><input type="checkbox" id="erase"> <span data-i18n="erase.label"></span></label>
+    <p id="erase-hint" class="muted"></p>
+
+    <div class="actions">
+      <button type="button" id="install" class="primary" data-i18n="install.button"></button>
+      <button type="button" id="settings-only" data-i18n="settingsOnly.button"></button>
+    </div>
+  </section>
+
+  <section class="card" id="step-progress" hidden>
+    <h2 data-i18n="progress.title"></h2>
+    <progress id="bar" max="1" value="0"></progress>
+    <p id="progress-text" class="muted"></p>
+  </section>
+
+  <p id="message" class="notice" hidden></p>
+
+  <details id="log-box">
+    <summary data-i18n="log.title"></summary>
+    <pre id="log"></pre>
+  </details>
+</main>
+
+<footer class="muted">
+  <a href="https://github.com/Wassili-Hense/EspNode" data-i18n="footer.source"></a> ·
+  <a href="https://github.com/Wassili-Hense/EspNode/blob/main/docs/cfg-format.md" data-i18n="footer.cfg"></a>
+</footer>
 </body>
 </html>

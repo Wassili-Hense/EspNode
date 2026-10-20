@@ -39,3 +39,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 test/host/run.py
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24             # ES modules of site/ without package.json: syntax detection
+      - name: Installer page modules
+        run: node test/js/test_site.mjs
