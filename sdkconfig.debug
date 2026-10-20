@@ -1,0 +1,8 @@
+# Debug build: console and boot log on UART0 (USB of devkits), MQTT-SN without cfg on UART1,
+# GPIO17/16, through a USB-UART adapter. On top of sdkconfig.defaults:
+#   idf.py -B build/default -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.debug" build
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_BOOTLOADER_LOG_LEVEL_INFO=y
+CONFIG_ESPNODE_UART_PORT=1
+CONFIG_ESPNODE_UART_TX_PIN=17
+CONFIG_ESPNODE_UART_RX_PIN=16

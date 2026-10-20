@@ -1,25 +1,27 @@
 menu "EspNode"
 
     menu "MQTT-SN serial link"
+        comment "Used when the cfg partition is missing or invalid"
 
         config ESPNODE_UART_PORT
             int "UART port"
-            range 1 2
-            default 1
+            range 0 2
+            default 0
             help
-                UART0 stays the console.
+                UART0 is the USB port of devkits: the console is off (sdkconfig.defaults).
+                For debugging with the console on UART0 choose UART1 or UART2.
 
         config ESPNODE_UART_TX_PIN
             int "TX GPIO"
             range 0 33
-            default 17
+            default 1
             help
                 On WROVER modules GPIO16/17 are used by PSRAM, choose other pins.
 
         config ESPNODE_UART_RX_PIN
             int "RX GPIO"
             range 0 39
-            default 16
+            default 3
 
         config ESPNODE_UART_DE_PIN
             int "RS485 DE GPIO (-1 = plain UART)"
@@ -34,11 +36,12 @@ menu "EspNode"
 
     endmenu
 
-    config ESPNODE_DEVICE_TYPE
-        string "Device type"
-        default "E1S10"
+    config ESPNODE_HW_VERSION
+        string "Hardware version"
+        default "10"
         help
-            X13 declarer: uC family (E - ESP32), subtype, PHY1 (S - serial), HW version.
+            Last two characters of the X13 declarer (device type). The declarer is
+            "E1" (uC family E - ESP32, subtype 1) + PHY letters of the interfaces + this version.
 
     config ESPNODE_SW_VERSION
         string "Software version"

@@ -1,11 +1,18 @@
 CONFIG_IDF_TARGET="esp32"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
-# Partition "plc" holds the PLC program
+# Partitions "plc" (PLC program) and "cfg" (node configuration from the installer page)
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # 1 ms scheduler tick: the node loop runs a 10 ms poll cycle
 CONFIG_FREERTOS_HZ=1000
+
+# No console: by default MQTT-SN runs on UART0 (USB of devkits), and any text in the X13 serial
+# framing (no CRC) disturbs the gateway. ROM messages at reset remain. For debugging enable the
+# console in your sdkconfig and move MQTT-SN to UART1/2 (README).
+CONFIG_ESP_CONSOLE_NONE=y
+CONFIG_BOOTLOADER_LOG_LEVEL_NONE=y
 
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y

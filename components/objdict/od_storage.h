@@ -10,8 +10,9 @@
 #include "esp_err.h"
 #include "objdict.h"
 
-// Open storage; a missing or different cfg_ver resets everything to defaults
-esp_err_t od_storage_init(uint16_t cfg_ver);
+// Open storage; a missing or different cfg_ver resets everything to defaults, a new
+// cfg->cfg_generation resets the name and addresses to the values of cfg
+esp_err_t od_storage_init(uint16_t cfg_ver, const od_config_t *cfg);
 
 // Node name, returns length
 size_t    od_storage_name(uint8_t *buf, size_t max);

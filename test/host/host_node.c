@@ -1,8 +1,10 @@
 // Host node for the end-to-end tests: real mqttsn/objdict/serial_frame/plc code, simulated time,
 // in-memory NVS and program storage, fake IO hardware.
 // Line protocol on stdin: "rx <hex>", "tick <n>", "status", "reboot", "packtest", "hw" (IO calls
-// since the last "hw"), "level <pin>", "set <pin> <0|1>", "quit".
+// since the last "hw"), "level <pin>", "set <pin> <0|1>", "cfg <generation> <node id hex> <device type>
+// [name]" (cfg partition from the next "reboot"), "quit".
 // Output: "tx <hex frame>" lines, other results, then "ok".
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,6 +43,7 @@ static esp_err_t kv_get(const char *key, void *v, size_t len)
 esp_err_t nvs_open(const char *ns, nvs_open_mode_t m, nvs_handle_t *h) { (void)ns; (void)m; *h = 1; return ESP_OK; }
 esp_err_t nvs_get_u8(nvs_handle_t h, const char *k, uint8_t *v) { (void)h; return kv_get(k, v, 1); }
 esp_err_t nvs_get_u16(nvs_handle_t h, const char *k, uint16_t *v) { (void)h; return kv_get(k, v, 2); }
+esp_err_t nvs_get_u32(nvs_handle_t h, const char *k, uint32_t *v) { (void)h; return kv_get(k, v, 4); }
 esp_err_t nvs_get_blob(nvs_handle_t h, const char *k, void *v, size_t *len)
 {
     (void)h; kv_t *e = kv_find(k);
@@ -50,6 +53,7 @@ esp_err_t nvs_get_blob(nvs_handle_t h, const char *k, void *v, size_t *len)
 }
 esp_err_t nvs_set_u8(nvs_handle_t h, const char *k, uint8_t v) { (void)h; return kv_set(k, &v, 1); }
 esp_err_t nvs_set_u16(nvs_handle_t h, const char *k, uint16_t v) { (void)h; return kv_set(k, &v, 2); }
+esp_err_t nvs_set_u32(nvs_handle_t h, const char *k, uint32_t v) { (void)h; return kv_set(k, &v, 4); }
 esp_err_t nvs_set_blob(nvs_handle_t h, const char *k, const void *v, size_t len) { (void)h; return kv_set(k, v, len); }
 esp_err_t nvs_erase_key(nvs_handle_t h, const char *k) { (void)h; kv_t *e = kv_find(k); if (!e) return ESP_ERR_NVS_NOT_FOUND; e->used = 0; return ESP_OK; }
 esp_err_t nvs_erase_all(nvs_handle_t h) { (void)h; memset(kv, 0, sizeof kv); return ESP_OK; }
@@ -82,6 +86,11 @@ static const mqttsn_transport_t transport = {
     .set_addr = NULL,
 };
 
+// cfg partition as main.c passes it to od_init()
+static struct { uint32_t generation; unsigned node_id; char device_type[16]; char name[24]; } node_cfg = {
+    0, 0xFF, "E1S10.400", "",
+};
+
 static void start(void)
 {
     fake_reset();
@@ -92,7 +101,10 @@ static void start(void)
     if (plc_init(&plc_cfg) != ESP_OK) { fprintf(stderr, "plc_init failed\n"); exit(1); }
     static const od_provider_t *providers[1];
     providers[0] = plc_provider();
-    const od_config_t od_cfg = { .device_type = "E1S10.400", .providers = providers, .n_providers = 1 };
+    const od_config_t od_cfg = {
+        .device_type = node_cfg.device_type, .providers = providers, .n_providers = 1,
+        .cfg_generation = node_cfg.generation, .node_name = node_cfg.name, .node_id = (uint8_t)node_cfg.node_id,
+    };
     if (od_init(&od_cfg) != ESP_OK) { fprintf(stderr, "od_init failed\n"); exit(1); }
     const mqttsn_client_config_t cfg = {
         .transport = &transport,
@@ -179,6 +191,10 @@ int main(void)
             int pin = 0, level = 0;
             sscanf(line + 4, "%d %d", &pin, &level);
             fake_level[pin % PLC_HW_PINS] = level != 0;
+        } else if (!strncmp(line, "cfg ", 4)) {
+            node_cfg.name[0] = '\0';
+            sscanf(line + 4, "%" SCNu32 " %x %15s %23s", &node_cfg.generation, &node_cfg.node_id, node_cfg.device_type,
+                   node_cfg.name);
         } else if (!strcmp(line, "quit")) {
             break;
         }

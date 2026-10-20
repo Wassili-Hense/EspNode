@@ -1,6 +1,6 @@
 """Build and run the host tests.
 
-    python test/host/run.py [test ...]      tests: vm, io, clock, e2e, e2e_plc (default: all)
+    python test/host/run.py [test ...]      tests: vm, io, clock, cfg, cfg_gen, e2e, e2e_plc (default: all)
 
 C compiler: $CC, default "gcc"; any gcc or clang, e.g. CC=clang or CC="zig cc".
 """
@@ -16,7 +16,7 @@ BUILD = HERE / 'build'
 EXE = '.exe' if os.name == 'nt' else ''
 
 INCLUDE = [HERE / 'stubs', HERE] + [COMP / d for d in (
-    'plc', 'plc/include', 'mqttsn', 'mqttsn/include', 'objdict', 'objdict/include',
+    'plc', 'plc/include', 'mqttsn', 'mqttsn/include', 'node_cfg/include', 'objdict', 'objdict/include',
     'serial_phy', 'serial_phy/include')]
 FLAGS = ['-std=c11', '-g', '-O1', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter']
 
@@ -25,14 +25,17 @@ BINARIES = {
     'test_vm': [HERE / 'test_vm.c', COMP / 'plc/plc_vm.c'],
     'test_io': [HERE / 'test_io.c', HERE / 'fake_hw.c'] + PLC,
     'test_clock': [HERE / 'test_clock.c', COMP / 'objdict/od_clock.c'],
+    'test_cfg': [HERE / 'test_cfg.c', COMP / 'node_cfg/node_cfg.c'],
     'host_node': [HERE / 'host_node.c', HERE / 'fake_hw.c', HERE / 'fake_store.c', COMP / 'plc/plc.c']
     + PLC + [COMP / f for f in ('mqttsn/mqttsn_client.c', 'mqttsn/mqttsn_msg.c', 'objdict/objdict.c',
                                 'objdict/od_pack.c', 'objdict/od_storage.c', 'serial_phy/serial_frame.c')],
 }
-TESTS = {                               # name: (binary, command)
+TESTS = {                               # name: (binary or None, command)
     'vm': ('test_vm', [str(BUILD / ('test_vm' + EXE))]),
     'io': ('test_io', [str(BUILD / ('test_io' + EXE))]),
     'clock': ('test_clock', [str(BUILD / ('test_clock' + EXE))]),
+    'cfg': ('test_cfg', [str(BUILD / ('test_cfg' + EXE))]),
+    'cfg_gen': (None, [sys.executable, str(HERE.parents[1] / 'tools' / 'mkcfg.py'), '--selftest']),
     'e2e': ('host_node', [sys.executable, str(HERE / 'e2e.py')]),
     'e2e_plc': ('host_node', [sys.executable, str(HERE / 'e2e_plc.py')]),
 }
@@ -54,7 +57,7 @@ def main():
         sys.exit(f'unknown test: {" ".join(unknown)}; tests: {" ".join(TESTS)}')
 
     BUILD.mkdir(exist_ok=True)
-    for binary in sorted({TESTS[n][0] for n in names}):
+    for binary in sorted({TESTS[n][0] for n in names} - {None}):
         build(binary)
 
     failed = []

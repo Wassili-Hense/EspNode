@@ -2,7 +2,7 @@
 <xst path='/$YS/TYPES/MQTT-SN'>
   <i n='E1S10' s='{
     "editor": "MsStatus",
-    "hint": "EspNode, ESP32, phy1: UART (GPIO16 RX, GPIO17 TX by default)",
+    "hint": "EspNode, ESP32, phy1: UART (GPIO3 RX, GPIO1 TX - USB of devkits - by default)",
     "Action": [{ "name": "MQTT_SN.SendDisconnect", "text": "Send Disconnect" }],
     "PLC": {
       "groups": {
@@ -99,5 +99,5 @@
         }
       }
     }
-  }' m='{"attr":4}' ver='1.0.2610.15001' />
+  }' m='{"attr":4}' ver='1.0.2610.20001' />
 </xst>

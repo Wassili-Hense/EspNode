@@ -253,13 +253,18 @@ static void publish_entry(const od_entry_t *entry, uint8_t flags)
     mqttsn_client_publish(flags, entry->topic_id, data, len);
 }
 
-// Settings are reset when the device type changes (X13: "Flag" in InitOD).
-// The software version after '.' is excluded, settings survive updates.
+// Settings are reset when the device type changes (X13: "Flag" in InitOD). Counted are the uC family
+// and subtype (first two characters of the declarer) and the HW version (last two). Excluded are the
+// software version after '.', settings survive updates, and the PHY letters between: they follow the
+// interfaces of cfg, a new cfg resets the name and addresses but keeps the objects.
 static uint16_t cfg_version(const char *device_type)
 {
+    size_t len = strcspn(device_type, ".");
     uint16_t ver = STORAGE_LAYOUT << 12;
-    for (const char *p = device_type; (*p != '\0') && (*p != '.'); p++) {
-        ver += (uint8_t)*p;
+    for (size_t i = 0; i < len; i++) {
+        if ((i < 2) || (i >= len - 2)) {
+            ver += (uint8_t)device_type[i];
+        }
     }
     return ver;
 }
@@ -341,7 +346,7 @@ esp_err_t od_init(const od_config_t *cfg)
     s.n_providers = cfg->n_providers;
     s.reg_rec = NO_RECORD;
 
-    ESP_RETURN_ON_ERROR(od_storage_init(cfg_version(cfg->device_type)), TAG, "storage");
+    ESP_RETURN_ON_ERROR(od_storage_init(cfg_version(cfg->device_type), cfg), TAG, "storage");
 
     for (size_t i = 0; i < OD_MAX; i++) {
         s.list[i].topic_id = OD_TOPIC_FREE;

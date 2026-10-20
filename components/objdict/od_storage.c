@@ -1,6 +1,7 @@
 /*
  * Persistent settings of the Object Dictionary, NVS backed with a RAM copy.
  */
+#include <inttypes.h>
 #include <string.h>
 
 #include "esp_check.h"
@@ -15,6 +16,7 @@ static const char *TAG = "od_storage";
 
 #define NVS_NAMESPACE       "x13"
 #define KEY_CFG_VER         "cfg_ver"
+#define KEY_CFG_GEN         "cfg_gen"   // Generation of the last applied cfg partition
 #define KEY_NAME            "name"
 #define KEY_NODE_ID         "node_id"
 #define KEY_GATE_ID         "gate_id"
@@ -47,21 +49,50 @@ static esp_err_t save_list(void)
     return commit(nvs_set_blob(s.nvs, KEY_OD_LIST, s.list, sizeof(s.list)));
 }
 
-static esp_err_t load_defaults(uint16_t cfg_ver)
+// Name and node address from cfg, search the gateway; not committed
+static esp_err_t set_from_cfg(const od_config_t *cfg)
 {
-    ESP_LOGW(TAG, "no valid configuration, loading defaults");
+    size_t len = (cfg->node_name != NULL) ? strlen(cfg->node_name) : 0;
+    if (len > sizeof(s.name)) {
+        len = sizeof(s.name);
+    }
+    if (len > 0) {
+        memcpy(s.name, cfg->node_name, len);
+    }
+    s.name_len = (uint8_t)len;
+    s.node_id = cfg->node_id;
+    s.gate_id = ADDR_UNDEF;
 
-    s.name_len = 0;
-    s.node_id = ADDR_UNDEF;             // Request address via DHCP
-    s.gate_id = ADDR_UNDEF;             // Search gateway
-    memset(s.list, 0xFF, sizeof(s.list));
-
-    esp_err_t err = nvs_erase_all(s.nvs);       // Empty name is stored as no key
+    esp_err_t err;
+    if (len > 0) {
+        err = nvs_set_blob(s.nvs, KEY_NAME, s.name, len);
+    } else {
+        err = nvs_erase_key(s.nvs, KEY_NAME);   // Empty name is stored as no key
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            err = ESP_OK;
+        }
+    }
     if (err == ESP_OK) {
         err = nvs_set_u8(s.nvs, KEY_NODE_ID, s.node_id);
     }
     if (err == ESP_OK) {
         err = nvs_set_u8(s.nvs, KEY_GATE_ID, s.gate_id);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u32(s.nvs, KEY_CFG_GEN, cfg->cfg_generation);
+    }
+    return err;
+}
+
+static esp_err_t load_defaults(uint16_t cfg_ver, const od_config_t *cfg)
+{
+    ESP_LOGW(TAG, "no valid configuration, loading defaults");
+
+    memset(s.list, 0xFF, sizeof(s.list));
+
+    esp_err_t err = nvs_erase_all(s.nvs);
+    if (err == ESP_OK) {
+        err = set_from_cfg(cfg);
     }
     if (err == ESP_OK) {
         err = nvs_set_blob(s.nvs, KEY_OD_LIST, s.list, sizeof(s.list));
@@ -72,13 +103,24 @@ static esp_err_t load_defaults(uint16_t cfg_ver)
     return commit(err);
 }
 
-esp_err_t od_storage_init(uint16_t cfg_ver)
+esp_err_t od_storage_init(uint16_t cfg_ver, const od_config_t *cfg)
 {
     ESP_RETURN_ON_ERROR(nvs_open(NVS_NAMESPACE, NVS_READWRITE, &s.nvs), TAG, "nvs_open");
 
     uint16_t ver = 0;
     if ((nvs_get_u16(s.nvs, KEY_CFG_VER, &ver) != ESP_OK) || (ver != cfg_ver)) {
-        return load_defaults(cfg_ver);
+        return load_defaults(cfg_ver, cfg);
+    }
+
+    // The installer wrote a new cfg: it replaces the values the gateway has written, otherwise
+    // they would override the new configuration. The object list stays.
+    uint32_t gen = 0;
+    if (nvs_get_u32(s.nvs, KEY_CFG_GEN, &gen) != ESP_OK) {
+        gen = 0;
+    }
+    if ((cfg->cfg_generation != 0) && (cfg->cfg_generation != gen)) {
+        ESP_LOGI(TAG, "new configuration %" PRIu32 ", name and addresses from cfg", cfg->cfg_generation);
+        ESP_RETURN_ON_ERROR(commit(set_from_cfg(cfg)), TAG, "cfg");
     }
 
     size_t len = sizeof(s.name);

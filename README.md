@@ -19,13 +19,15 @@ PLC: пины, ШИМ, АЦП, ЦАП, счётчики, шины TWI и UART.
 | `components/serial_phy` | Транспорт UART/RS485, кодек кадров X13 |
 | `components/objdict` | Object Dictionary: predefined-объекты, регистрация, упаковка значений, NVS |
 | `components/plc` | VM (целые и float), управление программой, мерке́ры, API функции, ввод-вывод, хранение программы |
-| `main` | Задача узла (тик 10 мс), настройки в `menuconfig → EspNode` |
+| `components/node_cfg` | Раздел `cfg`: разбор и проверка настроек узла со страницы установки |
+| `main` | Задача узла (тик 10 мс), применение `cfg`; значения без `cfg` — в `menuconfig → EspNode` |
 | `tools/gw_sim.py` | Симулятор шлюза X13 для проверки без X13 |
-| `test/host` | Хостовые тесты: VM, ввод-вывод, сквозные MQTT-SN и PLC |
+| `tools/mkcfg.py` | Образ раздела `cfg`, пока нет страницы установки |
+| `test/host` | Хостовые тесты: VM, ввод-вывод, `cfg`, сквозные MQTT-SN и PLC |
 
 ## Сборка
 
-ESP-IDF ≥ 5.3 (проверено на v6.1), target `esp32`, flash ≥ 2 МБ.
+ESP-IDF ≥ 5.3 (проверено на v6.1), target `esp32`, flash 4 МБ.
 
 ```
 idf.py -B build/default build
@@ -36,20 +38,43 @@ idf.py -B build/default -p COM3 flash monitor
 для VS Code), а `idf.py` v6.1 не раскрывает `${sourceDir}` в его пути и без ключа создаёт каталог
 с буквальным именем `${sourceDir}`. Из VS Code собирается без ключа.
 
-Таблица разделов своя (`partitions.csv`, раздел `plc` для программы PLC): при переходе с прошивки
-без PLC нужна полная прошивка (`idf.py flash`), настройки в NVS сохраняются.
+Таблица разделов своя (`partitions.csv`: `plc` — программа PLC, `cfg` — настройки узла, адреса —
+[docs/cfg-format.md](docs/cfg-format.md)): после её изменения нужна полная прошивка (`idf.py flash`).
+
+Консоли нет: без `cfg` MQTT-SN занимает UART0, а текст в линии мешает шлюзу. Отладочная сборка —
+с консолью и журналом загрузчика на UART0 и MQTT-SN на UART1 (GPIO17/16, через USB-UART адаптер):
+
+```
+idf.py -B build/default -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.debug" build
+```
+
+ESP-IDF v6.1 помечает в `sdkconfig` значения по умолчанию (`# default:`) и заменяет их значениями из
+`sdkconfig.defaults` и `sdkconfig.debug`; выбранное в `menuconfig` остаётся. Консоль и MQTT-SN на одном
+UART — ошибка сборки.
 
 ## Подключение
 
-По умолчанию MQTT-SN идёт через UART1: TX = GPIO17, RX = GPIO16, 38400 8N1; консоль и логи — UART0.
-Для RS485 задайте `ESPNODE_UART_DE_PIN` (DE и /RE трансивера соединены).
+Интерфейс MQTT-SN, имя и адрес узла задаёт раздел `cfg` ([docs/cfg-format.md](docs/cfg-format.md)), его
+записывает страница установки. Без `cfg` или с испорченным `cfg` MQTT-SN идёт через UART0 — USB-порт
+devkit: TX = GPIO1, RX = GPIO3, 38400 8N1. Пока поддерживается один интерфейс UART с кадром SLIP; WiFi,
+RS-485 и интерфейсы-шлюзы — впереди ([TODO.md](TODO.md)), `cfg` с ними применяется как испорченный.
+
+Пока страницы установки нет, `cfg` собирает `tools/mkcfg.py`:
+
+```
+python tools/mkcfg.py --name kitchen --uart 1,17,16,-,38400     # порт, TX, RX, DE ("-" — нет), скорость
+python -m esptool --port COM3 write-flash 0x1a0000 cfg.bin
+```
+
+Узел применяет `cfg` при запуске. Имя и адреса, записанные потом по сети, главнее `cfg`, пока не будет
+записан новый `cfg`.
 
 ## Проверка с симулятором
 
 ```
 pip install pyserial
 python tools/gw_sim.py --selftest
-python tools/gw_sim.py COM5          # USB-UART адаптер на GPIO17/16
+python tools/gw_sim.py COM3          # USB devkit (UART0); отладочная сборка — адаптер на GPIO17/16
 ```
 
 На чистом узле: DHCPREQ → SEARCHGW → CONNECT `E1S10_10` → REGISTER `pa1` → PUBLISH 0xFF07 (часы),

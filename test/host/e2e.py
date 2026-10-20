@@ -108,6 +108,55 @@ h.gw.disconnect()
 h.run(120_000, until=lambda: h.status() == 'CONNECT')
 check(h.gw.client_id == 'E1S10_10', f'empty name -> default client id {h.gw.client_id!r}')
 
+
+# 10. cfg partition: a new generation replaces the name and address written over the network, the
+#     objects stay; the PHY letters of the device type follow cfg and keep them too
+def reboot():
+    h.cmd('reboot')
+    h.gw.client_id = None
+    mark = h.ms
+    return h.run(120_000, until=lambda: h.status() == 'CONNECT'), mark
+
+
+def node_published(topic, since):
+    pubs = [m for m in h.node_msgs(since) if m[1] == g.PUBLISH and g.u16(m, 3) == topic]
+    return pubs[-1][7:] if pubs else None
+
+
+def node_registered(since):
+    return [m[6:].decode() for m in h.node_msgs(since) if m[1] == g.REGISTER]
+
+
+mark = h.ms
+h.gw.register(20, 'Md0')
+acks = [m for m in h.node_msgs(mark) if m[1] == g.REGACK]
+check(acks and acks[-1][6] == 0, 'REGISTER Md0 accepted')
+h.gw.publish(0xFF00, b'kitchen', predef=True)
+
+h.cmd('cfg 1000 20 E1S10.400 hall')
+ok, mark = reboot()
+check(ok and h.gw.client_id == 'hall' and 'DHCPREQ' not in h.types(mark) and
+      node_published(0xFFC1, mark) == b'\x20',
+      f'new cfg: client id {h.gw.client_id!r}, address {node_published(0xFFC1, mark)}')
+check('Md0' in node_registered(mark), f'new cfg: objects kept {node_registered(mark)}')
+
+h.gw.publish(0xFF00, b'kitchen', predef=True)
+ok, mark = reboot()
+check(ok and h.gw.client_id == 'kitchen', f'same cfg: name from the gateway kept {h.gw.client_id!r}')
+
+h.cmd('cfg 1001 ff E1W10.400')
+ok, mark = reboot()
+check(ok and h.gw.client_id == 'E1W10_10' and 'DHCPREQ' in h.types(mark) and
+      node_published(0xFFC0, mark) == b'E1W10.400',
+      f'new template: client id {h.gw.client_id!r}, {" ".join(h.types(mark)[:3])}')
+check('Md0' in node_registered(mark), f'new template: objects kept {node_registered(mark)}')
+
+h.gw.publish(0xFF00, b'porch', predef=True)
+h.cmd('cfg 0 ff E1S10.400')
+ok, mark = reboot()
+check(ok and h.gw.client_id == 'porch' and 'DHCPREQ' not in h.types(mark),
+      f'no cfg: saved values kept, client id {h.gw.client_id!r}')
+
 h.cmd('quit')
 print(f'{"FAILED" if hn.failed else "ALL PASSED"} in {time.time() - t0:.1f} s real time')
 sys.exit(1 if hn.failed else 0)

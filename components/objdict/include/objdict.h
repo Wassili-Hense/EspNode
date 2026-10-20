@@ -101,6 +101,11 @@ typedef struct {
     const char                 *device_type;    // "<declarer>.<sw version>", e.g. "E1S10.400"
     const od_provider_t *const *providers;
     size_t                      n_providers;
+    // Node settings from the installer (cfg partition). The values the gateway writes (name, node and
+    // gateway address) override them until a new generation of cfg arrives.
+    uint32_t                    cfg_generation; // 0 - no cfg, keep the saved values
+    const char                 *node_name;      // NULL or empty - "<declarer>_<address>"
+    uint8_t                     node_id;        // 0xFF - DHCP
 } od_config_t;
 
 // Wall clock: local time the gateway writes to OD_ID_RTC (Enviriot: at connect and every hour).
