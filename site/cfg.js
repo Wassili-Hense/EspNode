@@ -146,6 +146,56 @@ export function parse(img) {
     return { cfg };
 }
 
+// IPv4 fields of the page: "192.168.1.10", "192.168.1.10/24" (or /255.255.255.0), "192.168.1.2:1883"
+
+export function parseIpv4(s) {
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(s).trim());
+    const b = m ? m.slice(1).map(Number) : null;
+    return b && b.every(x => x <= 255) ? b : null;
+}
+
+export const formatIpv4 = b => b.join('.');
+
+// Address and mask: { ip, mask } or null
+export function parseIpMask(s) {
+    const [addr, mask, extra] = String(s).trim().split('/');
+    const ip = parseIpv4(addr);
+    if (!ip || mask === undefined || extra !== undefined) {
+        return null;
+    }
+    if (mask.includes('.')) {
+        const m = parseIpv4(mask);
+        return m ? { ip, mask: m } : null;
+    }
+    const n = /^\d{1,2}$/.test(mask) ? Number(mask) : -1;
+    if (n < 0 || n > 32) {
+        return null;
+    }
+    const bits = n === 0 ? 0 : (0xFFFFFFFF << (32 - n)) >>> 0;
+    return { ip, mask: [bits >>> 24, (bits >>> 16) & 0xFF, (bits >>> 8) & 0xFF, bits & 0xFF] };
+}
+
+// The prefix when the mask is contiguous, else the mask itself
+export function formatIpMask(ip, mask) {
+    const bits = ((mask[0] << 24) | (mask[1] << 16) | (mask[2] << 8) | mask[3]) >>> 0;
+    let prefix = 0;
+    while (prefix < 32 && (bits & (0x80000000 >>> prefix))) {
+        prefix++;
+    }
+    const contiguous = prefix === 32 || (bits & (0xFFFFFFFF >>> prefix)) === 0;
+    return `${formatIpv4(ip)}/${contiguous ? prefix : formatIpv4(mask)}`;
+}
+
+// Gateway address, the port 1883 if omitted: { ip, port } or null
+export function parseHostPort(s) {
+    const [addr, port, extra] = String(s).trim().split(':');
+    const ip = parseIpv4(addr);
+    const p = port === undefined ? 1883 : (/^\d{1,5}$/.test(port) ? Number(port) : -1);
+    return ip && extra === undefined && p >= 1 && p <= 0xFFFF ? { ip, port: p } : null;
+}
+
+export const formatHostPort = ({ ip, port }) => (port === 1883 ? formatIpv4(ip) : `${formatIpv4(ip)}:${port}`);
+
 // The rules of the firmware: a cfg it would reject (and fall back to UART0) is not written.
 // Returns null or the key of the error.
 export function check(cfg) {

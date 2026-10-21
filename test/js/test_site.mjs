@@ -3,7 +3,9 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-import { ADDR_DHCP, CFG_SIZE, build, check, crc32, parse } from '../../site/cfg.js';
+import {
+    ADDR_DHCP, CFG_SIZE, build, check, crc32, formatHostPort, formatIpMask, parse, parseHostPort, parseIpMask, parseIpv4,
+} from '../../site/cfg.js';
 import { STRINGS } from '../../site/i18n.js';
 import { APP_DESC_READ, parseAppDesc } from '../../site/image.js';
 import { md5 } from '../../site/md5.js';
@@ -107,6 +109,25 @@ ok(check(two) === 'pin-twice', 'same pin in two interfaces');
 ok(check({ ...full, wifi: { ...full.wifi, ssid: '' } }) === 'wifi-ssid', 'WiFi without SSID');
 ok(check({ ...full, interfaces: [{ type: 'wifi' }, { type: 'wifi' }] }) === 'wifi-twice', 'two WiFi');
 
+// IPv4 fields of the page
+ok(same(parseIpv4(' 192.168.1.10 '), [192, 168, 1, 10]) && parseIpv4('192.168.1.256') === null &&
+   parseIpv4('192.168.1') === null && parseIpv4('') === null, 'parseIpv4');
+ok(same(parseIpMask('192.168.1.10/24'), { ip: [192, 168, 1, 10], mask: [255, 255, 255, 0] }), 'ip/24');
+ok(same(parseIpMask('10.0.0.5/255.255.0.0'), { ip: [10, 0, 0, 5], mask: [255, 255, 0, 0] }), 'ip/dotted mask');
+ok(same(parseIpMask('10.0.0.5/32').mask, [255, 255, 255, 255]) && same(parseIpMask('10.0.0.5/0').mask, [0, 0, 0, 0]),
+   'prefix 32 and 0');
+ok(parseIpMask('192.168.1.10') === null && parseIpMask('192.168.1.10/33') === null &&
+   parseIpMask('192.168.1.10/24/1') === null, 'ip/mask errors');
+ok(formatIpMask([192, 168, 1, 10], [255, 255, 255, 0]) === '192.168.1.10/24' &&
+   formatIpMask([10, 0, 0, 5], [255, 255, 255, 255]) === '10.0.0.5/32' &&
+   formatIpMask([10, 0, 0, 5], [0, 0, 0, 0]) === '10.0.0.5/0' &&
+   formatIpMask([10, 0, 0, 5], [255, 0, 255, 0]) === '10.0.0.5/255.0.255.0', 'formatIpMask');
+ok(same(parseHostPort('192.168.1.2'), { ip: [192, 168, 1, 2], port: 1883 }) &&
+   same(parseHostPort('192.168.1.2:1884'), { ip: [192, 168, 1, 2], port: 1884 }) &&
+   parseHostPort('192.168.1.2:0') === null && parseHostPort('192.168.1.2:70000') === null, 'parseHostPort');
+ok(formatHostPort({ ip: [192, 168, 1, 2], port: 1883 }) === '192.168.1.2' &&
+   formatHostPort({ ip: [192, 168, 1, 2], port: 1884 }) === '192.168.1.2:1884', 'formatHostPort');
+
 // MD5: RFC 1321 test suite, then lengths around the padding and 1 MB against node:crypto
 const rfc = {
     '': 'd41d8cd98f00b204e9800998ecf8427e',
@@ -144,19 +165,18 @@ const site = new URL('../../site/', import.meta.url);
 const html = readFileSync(new URL('index.html', site), 'utf8');
 const appJs = readFileSync(new URL('app.js', site), 'utf8');
 ok(same(Object.keys(STRINGS.ru).sort(), Object.keys(STRINGS.en).sort()), 'i18n: same keys in ru and en');
+// Every quoted string of app.js that looks like a key: t() calls, tables of fields, ternaries
+const prefixes = [...new Set(Object.keys(STRINGS.en).map(k => k.split('.')[0]))].join('|');
 const used = new Set([
     ...[...html.matchAll(/data-i18n(?:-placeholder)?="([^"]+)"/g)].map(m => m[1]),
-    ...[...appJs.matchAll(/\b(?:t|setProgress|PageError)\(\s*'([a-z.-]+)'/g)].map(m => m[1]),
-    ...[...appJs.matchAll(/\bsetMessage\('\w*',\s*'([a-z.-]+)'/g)].map(m => m[1]),     // (kind, key)
-    ...[...appJs.matchAll(/key: '([a-z.-]+)'/g)].map(m => m[1]),
-    ...['connect.busy', 'dev.cfg.ok', 'dev.cfg.other', 'erase.new', 'erase.keep', 'done.install', 'done.settings'],
-    ...Object.keys(STRINGS.en).filter(k => k.startsWith('check.')),
+    ...[...appJs.matchAll(new RegExp(`'((?:${prefixes})\\.[a-z.-]+)'`, 'g'))].map(m => m[1]),
+    ...['uart', 'wifi', 'rs485'].map(type => 'if.' + type),                     // t('if.' + type)
 ]);
 const missing = [...used].filter(k => !k.endsWith('.') && !(k in STRINGS.en));      // 'check.' + key: below
 ok(missing.length === 0, 'i18n: keys used by the page exist: ' + missing.join(' '));
 const checkKeys = ['name', 'addr', 'interfaces', 'port', 'port-twice', 'tx', 'rx', 'de', 'pin-twice', 'baud', 'framing',
-                   'wifi-ssid', 'wifi-twice'];
-ok(checkKeys.every(k => `check.${k}` in STRINGS.en), 'i18n: a text for every error of check()');
+                   'wifi-ssid', 'wifi-twice', 'unsupported', 'wifi-ip', 'wifi-router', 'wifi-gw'];
+ok(checkKeys.every(k => `check.${k}` in STRINGS.en), 'i18n: a text for every error of check() and of the fields');
 
 if (process.argv[2]) {
     console.log('app description:', parseAppDesc(new Uint8Array(readFileSync(process.argv[2]).subarray(0, APP_DESC_READ))));

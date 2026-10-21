@@ -52,31 +52,25 @@
 
   <section class="card" id="step-settings" hidden>
     <h2 data-i18n="settings.title"></h2>
-    <fieldset class="templates">
+    <fieldset class="templates" id="templates">
       <legend data-i18n="tpl.legend"></legend>
-      <label><input type="radio" name="tpl" value="serial" checked> <span data-i18n="tpl.serial"></span></label>
-      <label class="off"><input type="radio" name="tpl" value="wifi" disabled> <span data-i18n="tpl.wifi"></span>
-        <small data-i18n="tpl.soon"></small></label>
-      <label class="off"><input type="radio" name="tpl" value="wifi485" disabled> <span data-i18n="tpl.wifi485"></span>
-        <small data-i18n="tpl.soon"></small></label>
+      <label><input type="radio" name="tpl" value="serial"> <span data-i18n="tpl.serial"></span></label>
+      <label><input type="radio" name="tpl" value="wifi"> <span data-i18n="tpl.wifi"></span></label>
+      <label><input type="radio" name="tpl" value="wifi485"> <span data-i18n="tpl.wifi485"></span></label>
+      <label><input type="radio" name="tpl" value="custom"> <span data-i18n="tpl.custom"></span></label>
     </fieldset>
+    <p class="muted" data-i18n="tpl.hint"></p>
 
-    <div class="fields">
-      <label><span data-i18n="f.port"></span>
-        <select id="f-port"><option>0</option><option>1</option><option>2</option></select></label>
-      <label><span data-i18n="f.tx"></span><input id="f-tx" type="number" min="0" max="33" required></label>
-      <label><span data-i18n="f.rx"></span><input id="f-rx" type="number" min="0" max="39" required></label>
-      <label><span data-i18n="f.de"></span><input id="f-de" type="number" min="0" max="33" data-i18n-placeholder="f.de.none"></label>
-      <label><span data-i18n="f.baud"></span><input id="f-baud" type="number" min="1200" max="5000000" list="bauds" required></label>
+    <div id="ifaces"></div>
+    <div class="actions">
+      <button type="button" id="add-iface" data-i18n="if.add"></button>
+    </div>
+    <p class="muted" data-i18n="if.hint"></p>
+
+    <div class="fields node">
       <label><span data-i18n="f.addr"></span><input id="f-addr" type="number" min="1" max="254" data-i18n-placeholder="f.addr.dhcp"></label>
       <label class="wide"><span data-i18n="f.name"></span><input id="f-name" maxlength="23" autocomplete="off" data-i18n-placeholder="f.name.auto"></label>
     </div>
-    <datalist id="bauds">
-      <option value="9600"></option><option value="19200"></option><option value="38400"></option>
-      <option value="57600"></option><option value="115200"></option><option value="200000"></option>
-    </datalist>
-    <p class="muted"><span data-i18n="f.hint"></span>
-      <button type="button" id="defaults" class="link" data-i18n="f.defaults"></button></p>
 
     <label class="check"><input type="checkbox" id="erase"> <span data-i18n="erase.label"></span></label>
     <p id="erase-hint" class="muted"></p>

@@ -1,16 +1,45 @@
 // Installer page: connects to the board over Web Serial, flashes the firmware of manifest.json and writes
 // the cfg partition (docs/cfg-format.md). esptool-js comes from the import map of index.html.
-import { ADDR_DHCP, build, check, parse } from './cfg.js';
+import {
+    ADDR_DHCP, build, check, formatHostPort, formatIpMask, formatIpv4, parse, parseHostPort, parseIpMask, parseIpv4,
+} from './cfg.js';
 import { getLang, initLang, onLangChange, setLang, t } from './i18n.js';
 import { APP_DESC_READ, parseAppDesc } from './image.js';
 import { md5 } from './md5.js';
 
 const BAUD = 460800;                    // Once the flasher stub runs; the ROM talks 115200
-const STORE_FORM = 'espnode.serial';
-// Template Serial, as Kconfig without cfg: UART0 is the USB port of devkits
-const DEFAULTS = { port: 0, tx: 1, rx: 3, de: null, baud: 38400, addr: null, name: '' };
+const STORE_FORM = 'espnode.form';
+const MAX_IFS = 4;
+
+// What this firmware runs; the page and the firmware are published from one commit. WiFi (TODO §2), RS-485
+// and gateway interfaces (§3) unlock here.
+const FIRMWARE = { types: ['uart'], interfaces: 1 };
+
+// Interface rows: uart - X13 serial (SLIP), rs485 - X13 RS-485 (F0 1C), wifi
+const IF_DEFAULTS = {
+    uart: { type: 'uart', port: 0, tx: 1, rx: 3 },
+    wifi: { type: 'wifi', ssid: '', password: '', ip: '', router: '', gateway: '' },
+    rs485: { type: 'rs485', port: 1, tx: 17, rx: 16, de: 4 },
+};
+// The speed comes with the type: X13 serial as the serial gateway of Enviriot, X13 RS-485
+const IF_BAUD = { uart: 38400, rs485: 200000 };
+const TEMPLATES = {
+    serial: [IF_DEFAULTS.uart],                         // UART0: the USB port of devkits, as Kconfig without cfg
+    wifi: [IF_DEFAULTS.wifi],
+    wifi485: [IF_DEFAULTS.wifi, IF_DEFAULTS.rs485],     // RS-485 on UART1: gateway for X13 nodes
+};
+// Fields of a row: key, text, input
+const FIELDS = {
+    uart: [['port', 'f.port', 'port'], ['tx', 'f.tx', 'pin'], ['rx', 'f.rx', 'pin']],
+    rs485: [['port', 'f.port', 'port'], ['tx', 'f.tx', 'pin'], ['rx', 'f.rx', 'pin'], ['de', 'f.de', 'pin']],
+    wifi: [['ssid', 'f.ssid', 'text'], ['password', 'f.password', 'password'], ['ip', 'f.ip', 'text', 'f.ip.dhcp'],
+           ['router', 'f.router', 'text'], ['gateway', 'f.gw', 'text', 'f.gw.search']],
+};
+// Data of the user, not part of a template: editing them keeps the template
+const OWN_DATA = ['ssid', 'password', 'ip', 'router', 'gateway'];
 
 const $ = id => document.getElementById(id);
+const copy = rows => rows.map(r => ({ ...r }));
 
 // Error with a text key: the message follows a language change
 class PageError extends Error {
@@ -27,6 +56,8 @@ const state = {
     transport: null,
     loader: null,
     device: null,           // { chip, mac, flash, app, cfg, isNew }
+    tpl: 'serial',          // Key of TEMPLATES or 'custom'
+    ifs: copy(TEMPLATES.serial),
     message: null,          // { kind: '' | 'warn' | 'error', key, vars }
     progress: null,         // { key, vars, value }
     busy: false,
@@ -78,47 +109,186 @@ function sizeBytes(s) {
 }
 
 ////////////////////////////////////////////////////////////////////////
-// Form of the template Serial
+// Interfaces and templates
 
-// cfg of the template, null for other ones (WiFi, RS-485, several interfaces)
-function toForm(cfg) {
-    const itf = cfg.interfaces[0];
-    if (cfg.interfaces.length !== 1 || itf.type !== 'uart' || itf.framing !== 'slip') {
-        return null;
+const runs = rows => rows.length <= FIRMWARE.interfaces && rows.every(r => FIRMWARE.types.includes(r.type));
+
+// Template with these rows, the data of the user aside; 'custom' if none
+function templateOf(rows) {
+    const sig = rs => JSON.stringify(rs.map(r => r.type === 'wifi' ? 'wifi'
+        : [r.type, r.port, r.tx, r.rx, r.de ?? null]));
+    return Object.keys(TEMPLATES).find(k => sig(TEMPLATES[k]) === sig(rows)) ?? 'custom';
+}
+
+// Rows of a cfg read from the board; another speed than the one of the type is not kept
+function rowsOf(cfg) {
+    const w = cfg.wifi;
+    return cfg.interfaces.map(i => (i.type === 'wifi' ? {
+        type: 'wifi', ssid: w.ssid, password: w.password,
+        ip: w.ip ? formatIpMask(w.ip.ip, w.ip.mask) : '', router: w.ip ? formatIpv4(w.ip.gateway) : '',
+        gateway: w.gateway ? formatHostPort(w.gateway) : '',
+    } : {
+        type: i.framing === 'rs485' ? 'rs485' : 'uart', port: i.port, tx: i.tx, rx: i.rx, de: i.de,
+    }));
+}
+
+// cfg of the page, or { error } of a field the generator cannot take
+function toCfg(generation) {
+    const num = s => (String(s ?? '').trim() === '' ? null : Number(s));
+    const addr = num($('f-addr').value);
+    const cfg = {
+        generation, name: $('f-name').value.trim(), nodeAddr: addr ?? ADDR_DHCP, wifi: null,
+        interfaces: state.ifs.map(r => (r.type === 'wifi' ? { type: 'wifi' } : {
+            type: 'uart', port: num(r.port), tx: num(r.tx), rx: num(r.rx), de: num(r.de), baud: IF_BAUD[r.type],
+            framing: r.type === 'rs485' ? 'rs485' : 'slip',
+        })),
+    };
+    const w = state.ifs.find(r => r.type === 'wifi');
+    if (w) {
+        cfg.wifi = { ssid: w.ssid.trim(), password: w.password, ip: null, gateway: null };
+        if (w.ip.trim()) {
+            const ipm = parseIpMask(w.ip);
+            const router = parseIpv4(w.router);
+            if (!ipm) {
+                return { error: 'wifi-ip' };
+            }
+            if (!router) {
+                return { error: 'wifi-router' };
+            }
+            cfg.wifi.ip = { ip: ipm.ip, mask: ipm.mask, gateway: router };
+        }
+        if (w.gateway.trim()) {
+            cfg.wifi.gateway = parseHostPort(w.gateway);
+            if (!cfg.wifi.gateway) {
+                return { error: 'wifi-gw' };
+            }
+        }
     }
-    return {
-        port: itf.port, tx: itf.tx, rx: itf.rx, de: itf.de, baud: itf.baud,
-        addr: cfg.nodeAddr === ADDR_DHCP ? null : cfg.nodeAddr, name: cfg.name,
-    };
+    return { cfg };
 }
 
-function toCfg(v, generation) {
-    return {
-        generation, name: v.name, nodeAddr: v.addr ?? ADDR_DHCP, wifi: null,
-        interfaces: [{ type: 'uart', port: v.port, tx: v.tx, rx: v.rx, de: v.de, baud: v.baud, framing: 'slip' }],
-    };
+function setTemplate(tpl) {
+    if (tpl !== 'custom') {
+        // Keep what was typed for WiFi
+        const wifi = state.ifs.find(r => r.type === 'wifi');
+        state.ifs = copy(TEMPLATES[tpl]).map(r => (r.type === 'wifi' && wifi ? { ...wifi } : r));
+    }
+    state.tpl = tpl;
+    renderIfaces();
 }
 
-function readForm() {
-    const num = id => {
-        const s = $(id).value.trim();
-        return s === '' ? null : Number(s);
-    };
-    return {
-        port: num('f-port'), tx: num('f-tx'), rx: num('f-rx'), de: num('f-de'), baud: num('f-baud'),
-        addr: num('f-addr'), name: $('f-name').value.trim(),
-    };
+function fieldInput(row, [key, , kind, placeholder]) {
+    let el;
+    if (kind === 'port') {
+        el = document.createElement('select');
+        for (const p of [0, 1, 2]) {
+            el.add(new Option(`UART${p}`, String(p)));
+        }
+    } else {
+        el = document.createElement('input');
+        el.type = kind === 'password' ? 'password' : kind === 'text' ? 'text' : 'number';
+        if (kind === 'pin') {
+            el.min = 0;
+            el.max = 39;
+        }
+        el.autocomplete = 'off';
+        if (placeholder) {
+            el.placeholder = t(placeholder);
+        } else if (key === 'de') {
+            el.placeholder = t('f.de.none');
+        }
+    }
+    el.value = row[key] ?? '';
+    el.addEventListener('input', () => {
+        row[key] = kind === 'text' || kind === 'password' ? el.value : (el.value === '' ? null : Number(el.value));
+        if (!OWN_DATA.includes(key)) {
+            state.tpl = 'custom';
+            renderTemplates();
+        }
+    });
+    return el;
 }
 
-function writeForm(v) {
-    v = { ...DEFAULTS, ...v };
-    $('f-port').value = String(v.port);
-    $('f-tx').value = v.tx ?? '';
-    $('f-rx').value = v.rx ?? '';
-    $('f-de').value = v.de ?? '';
-    $('f-baud').value = v.baud ?? '';
-    $('f-addr').value = v.addr ?? '';
-    $('f-name').value = v.name ?? '';
+// Cells of the interfaces, from state.ifs
+function renderIfaces() {
+    const box = $('ifaces');
+    box.textContent = '';
+    state.ifs.forEach((row, i) => {
+        const cell = document.createElement('div');
+        cell.className = 'iface';
+
+        const head = document.createElement('div');
+        head.className = 'iface-head';
+        const title = document.createElement('span');
+        title.textContent = t('if.title', { n: i + 1, role: t(i === 0 ? 'if.client' : 'if.gateway') });
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'link';
+        remove.textContent = t('if.remove');
+        remove.disabled = state.ifs.length === 1;           // While busy the whole list is inert
+        remove.addEventListener('click', () => {
+            state.ifs.splice(i, 1);
+            state.tpl = 'custom';
+            renderIfaces();
+        });
+        head.append(title, remove);
+
+        const fields = document.createElement('div');
+        fields.className = 'iface-fields';
+        const typeLabel = document.createElement('label');
+        const typeSel = document.createElement('select');
+        for (const type of Object.keys(IF_DEFAULTS)) {
+            const opt = new Option(t('if.' + type), type);
+            opt.disabled = !FIRMWARE.types.includes(type);
+            typeSel.add(opt);
+        }
+        typeSel.value = row.type;
+        typeSel.addEventListener('change', () => {
+            state.ifs[i] = { ...IF_DEFAULTS[typeSel.value] };
+            state.tpl = 'custom';
+            renderIfaces();
+        });
+        typeLabel.append(Object.assign(document.createElement('span'), { textContent: t('if.type') }), typeSel);
+        fields.append(typeLabel);
+        for (const f of FIELDS[row.type]) {
+            const label = document.createElement('label');
+            label.className = 'f-' + f[0];
+            label.append(Object.assign(document.createElement('span'), { textContent: t(f[1]) }), fieldInput(row, f));
+            fields.append(label);
+        }
+
+        cell.append(head, fields);
+        box.append(cell);
+    });
+    renderTemplates();
+}
+
+function renderTemplates() {
+    for (const input of document.querySelectorAll('input[name="tpl"]')) {
+        input.checked = input.value === state.tpl;
+        input.disabled = state.busy || (input.value !== 'custom' && !runs(TEMPLATES[input.value]));
+        input.parentElement.classList.toggle('off', input.disabled);
+    }
+    $('add-iface').disabled = state.busy || state.ifs.length >= Math.min(FIRMWARE.interfaces, MAX_IFS);
+}
+
+function loadForm(cfg) {
+    const saved = storeGet(STORE_FORM);
+    if (cfg) {
+        state.ifs = rowsOf(cfg);
+        $('f-addr').value = cfg.nodeAddr === ADDR_DHCP ? '' : cfg.nodeAddr;
+        $('f-name').value = cfg.name;
+    } else if (saved && Array.isArray(saved.ifs) && saved.ifs.length) {
+        state.ifs = saved.ifs;
+        $('f-addr').value = saved.addr ?? '';
+        $('f-name').value = saved.name ?? '';
+    } else {
+        state.ifs = copy(TEMPLATES.serial);
+        $('f-addr').value = '';
+        $('f-name').value = '';
+    }
+    state.tpl = templateOf(state.ifs);
+    renderIfaces();
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -147,8 +317,7 @@ function deviceTexts(dev) {
     const res = dev.cfg;
     let cfg;
     if (res.cfg) {
-        const date = formatDate(new Date(res.cfg.generation * 1000));
-        cfg = t(toForm(res.cfg) ? 'dev.cfg.ok' : 'dev.cfg.other', { date });
+        cfg = t('dev.cfg.ok', { date: formatDate(new Date(res.cfg.generation * 1000)) });
     } else {
         cfg = res.error === 'not-found' ? t('dev.cfg.none') : t('dev.cfg.bad', { error: res.error });
     }
@@ -178,9 +347,11 @@ function render() {
         $('dev-cfg').textContent = txt.cfg;
         $('erase-hint').textContent = t(dev.isNew ? 'erase.new' : 'erase.keep');
     }
-    for (const id of ['install', 'settings-only', 'defaults', 'erase']) {
+    for (const id of ['install', 'settings-only', 'erase', 'f-addr', 'f-name']) {
         $(id).disabled = state.busy;
     }
+    $('ifaces').inert = state.busy;
+    renderTemplates();
 
     const p = state.progress;
     $('step-progress').hidden = !p;
@@ -270,7 +441,7 @@ async function connect() {
         const espnode = app !== null && app.project === state.manifest.project;
         state.device = { chip, mac, flash, app, cfg, isNew: !espnode && !cfg.cfg };
 
-        writeForm((cfg.cfg && toForm(cfg.cfg)) || storeGet(STORE_FORM) || DEFAULTS);
+        loadForm(cfg.cfg);
         $('erase').checked = state.device.isNew;
         if (!flash) {
             state.message = { kind: 'warn', key: 'warn.flash', vars: { need } };
@@ -286,9 +457,12 @@ async function connect() {
 
 // Firmware of the manifest (and nvs, plc erased if checked) and cfg, or cfg only
 async function write(firmware) {
-    const values = readForm();
-    const cfg = toCfg(values, Math.floor(Date.now() / 1000));
-    const err = check(cfg);
+    if (!runs(state.ifs)) {
+        setMessage('error', 'check.unsupported');
+        return;
+    }
+    const { cfg, error } = toCfg(Math.floor(Date.now() / 1000));
+    const err = error ?? check(cfg);
     if (err) {
         setMessage('error', 'check.' + err);
         return;
@@ -327,7 +501,7 @@ async function write(firmware) {
                 { n: i + 1, count: files.length, name: files[i].name }, (i + written / total) / files.length),
             calculateMD5Hash: md5,                                      // esptool-js compares with the flash
         });
-        storeSet(STORE_FORM, values);
+        storeSet(STORE_FORM, { ifs: state.ifs, addr: $('f-addr').value, name: $('f-name').value });
         setProgress('progress.reset', {}, 1);
         await hardReset(state.transport);
         await closePort();
@@ -346,7 +520,10 @@ async function write(firmware) {
 
 async function init() {
     initLang();
-    onLangChange(render);
+    onLangChange(() => {
+        renderIfaces();
+        render();
+    });
     for (const b of document.querySelectorAll('[data-lang]')) {
         b.addEventListener('click', () => setLang(b.dataset.lang));
     }
@@ -357,7 +534,14 @@ async function init() {
     });
     $('install').addEventListener('click', () => write(true));
     $('settings-only').addEventListener('click', () => write(false));
-    $('defaults').addEventListener('click', () => writeForm(DEFAULTS));
+    for (const input of document.querySelectorAll('input[name="tpl"]')) {
+        input.addEventListener('change', () => setTemplate(input.value));
+    }
+    $('add-iface').addEventListener('click', () => {
+        state.ifs.push({ ...IF_DEFAULTS[FIRMWARE.types[0]] });
+        state.tpl = 'custom';
+        renderIfaces();
+    });
 
     if ('serial' in navigator) {
         navigator.serial.addEventListener('disconnect', async e => {
@@ -379,6 +563,7 @@ async function init() {
     } catch (e) {
         state.message = { kind: 'error', key: 'fw.error', vars: { error: e.message } };
     }
+    renderIfaces();
     render();
 }
 

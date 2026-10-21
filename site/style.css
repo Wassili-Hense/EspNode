@@ -167,6 +167,64 @@ label.off small {
     margin-left: 0.25rem;
 }
 
+/* Interface cells: one per interface, its fields wrap inside the cell */
+.iface {
+    margin-bottom: 0.75rem;
+    padding: 0.6rem 0.75rem 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+}
+
+.iface-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 0.4rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.iface-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+}
+
+.iface-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    width: 5.5rem;
+    font-size: 0.9rem;
+}
+
+.iface-fields input, .iface-fields select {
+    background: var(--card);
+}
+
+.iface-fields label:first-child {
+    width: 7rem;
+}
+
+.iface-fields .f-port {
+    width: 6.5rem;
+}
+
+.iface-fields .f-ssid, .iface-fields .f-password, .iface-fields .f-ip, .iface-fields .f-gateway {
+    width: 11rem;
+}
+
+.iface-fields .f-router {
+    width: 9rem;
+}
+
+.fields.node {
+    margin-top: 1rem;
+}
+
 .fields {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
