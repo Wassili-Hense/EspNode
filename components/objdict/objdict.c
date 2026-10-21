@@ -28,6 +28,8 @@ _Static_assert(OD_MAX < OD_ID_RTC, "Session position overlaps predefined ids");
 
 static struct {
     const char                 *device_type;
+    const char                 *name_suffix;
+    size_t                    (*phy1_addr)(uint8_t *buf, size_t max);
     const od_provider_t *const *providers;
     size_t                      n_providers;
     od_entry_t                  list[OD_MAX];       // Dynamic objects
@@ -97,6 +99,16 @@ static uint8_t write_gate_id(const od_subidx_t *sidx, uint8_t len, const uint8_t
     return (od_storage_set_gate_id(buf[0]) == ESP_OK) ? MQTTSN_RC_ACCEPTED : MQTTSN_RC_REJ_NOT_SUPP;
 }
 
+// PHY1 address: the 1-byte X13 address, or that of the link (WiFi: IPv4, as X13 LAN nodes)
+static uint8_t read_phy1_addr(const od_subidx_t *sidx, uint8_t *len, uint8_t *buf)
+{
+    if (s.phy1_addr == NULL) {
+        return read_node_id(sidx, len, buf);
+    }
+    *len = (uint8_t)s.phy1_addr(buf, *len);
+    return MQTTSN_RC_ACCEPTED;
+}
+
 static uint8_t read_device_type(const od_subidx_t *sidx, uint8_t *len, uint8_t *buf)
 {
     (void)sidx;
@@ -151,7 +163,7 @@ static const od_entry_t s_predef[] = {
     { { OD_PLACE_EEMEM,   OD_TYPE_UINT8,  0 }, OD_ID_NODE_ID,     read_node_id,     write_node_id,   NULL },
     { { OD_PLACE_EEMEM,   OD_TYPE_UINT8,  0 }, OD_ID_GATE_ID,     read_gate_id,     write_gate_id,   NULL },
     { { OD_PLACE_PROGMEM, OD_TYPE_STRING, 0 }, OD_ID_DEVICE_TYPE, read_device_type, NULL,            NULL },
-    { { OD_PLACE_PROGMEM, OD_TYPE_ARRAY,  1 }, OD_ID_PHY1_ADDR,   read_node_id,     NULL,            NULL },
+    { { OD_PLACE_PROGMEM, OD_TYPE_ARRAY,  1 }, OD_ID_PHY1_ADDR,   read_phy1_addr,   NULL,            NULL },
 };
 
 ////////////////////////////////////////////////////////////////////////
@@ -342,6 +354,8 @@ esp_err_t od_init(const od_config_t *cfg)
 
     memset(&s, 0, sizeof(s));
     s.device_type = cfg->device_type;
+    s.name_suffix = cfg->name_suffix;
+    s.phy1_addr = cfg->phy1_addr;
     s.providers = cfg->providers;
     s.n_providers = cfg->n_providers;
     s.reg_rec = NO_RECORD;
@@ -545,18 +559,30 @@ size_t od_get_client_id(uint8_t *buf)
         return len;
     }
 
+    // "<declarer>_<suffix>": the node address in hex, or the suffix of the link (WiFi: from the MAC)
     static const char hex[] = "0123456789ABCDEF";
-    uint8_t addr = od_storage_node_id();
-    const char *dt = s.device_type;
+    char addr_hex[3];
+    const char *suffix = s.name_suffix;
+    if (suffix == NULL) {
+        uint8_t addr = od_storage_node_id();
+        addr_hex[0] = hex[addr >> 4];
+        addr_hex[1] = hex[addr & 0x0F];
+        addr_hex[2] = '\0';
+        suffix = addr_hex;
+    }
+    size_t n = strlen(suffix);
+    if (n > MQTTSN_CLIENT_ID_MAX - 2) {
+        n = MQTTSN_CLIENT_ID_MAX - 2;
+    }
 
-    while ((dt[len] != '\0') && (dt[len] != '.') && (len < MQTTSN_CLIENT_ID_MAX - 3)) {
+    const char *dt = s.device_type;
+    while ((dt[len] != '\0') && (dt[len] != '.') && (len < MQTTSN_CLIENT_ID_MAX - 1 - n)) {
         buf[len] = (uint8_t)dt[len];
         len++;
     }
     buf[len++] = '_';
-    buf[len++] = (uint8_t)hex[addr >> 4];
-    buf[len++] = (uint8_t)hex[addr & 0x0F];
-    return len;
+    memcpy(&buf[len], suffix, n);
+    return len + n;
 }
 
 void od_load_addrs(mqttsn_addr_t *node, mqttsn_addr_t *gateway)

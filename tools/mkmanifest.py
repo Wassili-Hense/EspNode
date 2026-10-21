@@ -10,6 +10,7 @@ Partition addresses come from the built partition table, the one that is flashed
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import struct
@@ -47,7 +48,10 @@ def build_site(build: Path, site: Path, date: datetime) -> dict:
         src = build / name
         dst = f'{FW_DIR}/{src.name}'
         shutil.copyfile(src, site / dst)
-        files.append({'offset': int(offset, 0), 'path': dst, 'size': src.stat().st_size})
+        data = src.read_bytes()
+        # The page checks size and hash before writing: a cached old file is not flashed
+        files.append({'offset': int(offset, 0), 'path': dst, 'size': len(data),
+                      'sha256': hashlib.sha256(data).hexdigest()})
 
     manifest = {
         'project': desc['project_name'],

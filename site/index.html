@@ -62,13 +62,14 @@
     <p class="muted" data-i18n="tpl.hint"></p>
 
     <div id="ifaces"></div>
+    <datalist id="wifi-saved"></datalist>
     <div class="actions">
       <button type="button" id="add-iface" data-i18n="if.add"></button>
     </div>
     <p class="muted" data-i18n="if.hint"></p>
 
     <div class="fields node">
-      <label><span data-i18n="f.addr"></span><input id="f-addr" type="number" min="1" max="254" data-i18n-placeholder="f.addr.dhcp"></label>
+      <label id="addr-field"><span data-i18n="f.addr"></span><input id="f-addr" type="number" min="1" max="254" data-i18n-placeholder="f.addr.dhcp"></label>
       <label class="wide"><span data-i18n="f.name"></span><input id="f-name" maxlength="23" autocomplete="off" data-i18n-placeholder="f.name.auto"></label>
     </div>
 

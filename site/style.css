@@ -221,6 +221,24 @@ label.off small {
     width: 9rem;
 }
 
+.iface-fields label.check {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+}
+
+.iface-fields label.check input {
+    width: auto;
+}
+
+.iface-fields .note {
+    width: 100%;
+    margin: -0.4rem 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
 .fields.node {
     margin-top: 1rem;
 }

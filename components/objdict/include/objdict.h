@@ -104,8 +104,11 @@ typedef struct {
     // Node settings from the installer (cfg partition). The values the gateway writes (name, node and
     // gateway address) override them until a new generation of cfg arrives.
     uint32_t                    cfg_generation; // 0 - no cfg, keep the saved values
-    const char                 *node_name;      // NULL or empty - "<declarer>_<address>"
+    const char                 *node_name;      // NULL or empty - "<declarer>_<name_suffix>"
     uint8_t                     node_id;        // 0xFF - DHCP
+    // Links where the node address is not the 1-byte X13 address (WiFi: IPv4), NULL for the X13 ones
+    const char                 *name_suffix;    // Of the default name; NULL - the node address in hex
+    size_t                    (*phy1_addr)(uint8_t *buf, size_t max);  // Object 0xFFC1; NULL - node address
 } od_config_t;
 
 // Wall clock: local time the gateway writes to OD_ID_RTC (Enviriot: at connect and every hour).

@@ -1,11 +1,12 @@
 /*
- * EspNode: X13 MQTT-SN node over a serial link.
+ * EspNode: X13 MQTT-SN node over a serial link or WiFi.
  */
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -21,11 +22,12 @@
 #include "objdict.h"
 #include "plc.h"
 #include "serial_phy.h"
+#include "wifi_phy.h"
 
 static const char *TAG = "espnode";
 
 #define POLL_PERIOD_MS      10          // X13: POLL_TMR_FREQ = 100 Hz
-#define RX_QUEUE_LEN        8
+#define EVENT_QUEUE_LEN     8
 #define NODE_TASK_STACK     4096
 #define NODE_TASK_PRIO      5
 #define FLASH_PINS          0xFC0ull    // GPIO6-11
@@ -40,12 +42,18 @@ static const char *TAG = "espnode";
 #error "The console uses the default MQTT-SN UART: choose another ESPNODE_UART_PORT or disable the console"
 #endif
 
+// For the node task: a message from the link, or a new IP of the WiFi station
 typedef struct {
-    uint8_t         len;
+    enum { EV_RX, EV_IP } kind;
+    bool            has_src;            // EV_RX: false on the serial link, it has no addresses
+    mqttsn_addr_t   src;
+    uint8_t         len;                // EV_IP: 4 - msg holds the IP, 0 - lost
     uint8_t         msg[MQTTSN_MAX_MSG_LEN];
-} rx_msg_t;
+} node_event_t;
 
-static QueueHandle_t s_rx_queue;
+static QueueHandle_t s_events;
+static node_cfg_t s_cfg;                // Active configuration
+static uint8_t s_ip[4];                 // IP of the WiFi station, node task only
 
 static int64_t now_ms(void)
 {
@@ -99,16 +107,13 @@ static void default_cfg(node_cfg_t *cfg)
     };
 }
 
-// Interfaces this version can start: one X13 serial link. WiFi, RS-485 and gateway interfaces - TODO.md
+// Interfaces this version can start: one X13 serial link or WiFi. RS-485 and gateway interfaces - TODO.md
 static const char *unsupported(const node_cfg_t *cfg)
 {
     if (cfg->n_ifs > 1) {
         return "gateway interfaces not supported yet";
     }
-    if (cfg->ifs[0].type != NODE_CFG_IF_UART) {
-        return "WiFi not supported yet";
-    }
-    if (cfg->ifs[0].framing != NODE_CFG_FRAMING_SLIP) {
+    if ((cfg->ifs[0].type == NODE_CFG_IF_UART) && (cfg->ifs[0].framing != NODE_CFG_FRAMING_SLIP)) {
         return "RS-485 framing not supported yet";
     }
     return NULL;
@@ -151,16 +156,61 @@ static const char *device_type(const node_cfg_t *cfg)
     return buf;
 }
 
-// Called from the serial RX task, hands the message over to the node task
+static void post(const node_event_t *ev)
+{
+    if (xQueueSend(s_events, ev, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "event queue full, dropped");
+    }
+}
+
+// Called from the serial RX task
 static void on_serial_rx(const uint8_t *msg, size_t len, void *arg)
 {
     (void)arg;
+    node_event_t ev = { .kind = EV_RX, .len = (uint8_t)len };
+    memcpy(ev.msg, msg, len);
+    post(&ev);
+}
 
-    rx_msg_t rx = { .len = (uint8_t)len };
-    memcpy(rx.msg, msg, len);
-    if (xQueueSend(s_rx_queue, &rx, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "rx queue full, message dropped");
+// Called from the UDP RX task
+static void on_udp_rx(const mqttsn_addr_t *src, const uint8_t *msg, size_t len, void *arg)
+{
+    (void)arg;
+    node_event_t ev = { .kind = EV_RX, .has_src = true, .src = *src, .len = (uint8_t)len };
+    memcpy(ev.msg, msg, len);
+    post(&ev);
+}
+
+// Called from the event task: the station got an IP (NULL - lost it)
+static void on_wifi_ip(const uint8_t *ip, void *arg)
+{
+    (void)arg;
+    node_event_t ev = { .kind = EV_IP, .len = (ip != NULL) ? 4 : 0 };
+    if (ip != NULL) {
+        memcpy(ev.msg, ip, 4);
     }
+    post(&ev);
+}
+
+// WiFi: the node address is its IP, the gateway the one of cfg or found with SEARCHGW
+static void wifi_load_addrs(mqttsn_addr_t *node, mqttsn_addr_t *gateway)
+{
+    node->len = 4;
+    memcpy(node->b, s_ip, 4);
+    gateway->len = 4;
+    if (s_cfg.wifi.mqttsn_gw_set) {
+        memcpy(gateway->b, s_cfg.wifi.mqttsn_gw_ip, 4);
+    } else {
+        memset(gateway->b, 0, 4);
+    }
+}
+
+// Object 0xFFC1 on WiFi: the IP, as X13 LAN nodes
+static size_t wifi_phy1_addr(uint8_t *buf, size_t max)
+{
+    size_t n = (max < 4) ? max : 4;
+    memcpy(buf, s_ip, n);
+    return n;
 }
 
 // Owns the MQTT-SN client and the Object Dictionary
@@ -168,20 +218,25 @@ static void node_task(void *arg)
 {
     (void)arg;
 
+    const bool wifi = (s_cfg.ifs[0].type == NODE_CFG_IF_WIFI);
     const mqttsn_client_config_t cfg = {
-        .transport = serial_phy_transport(),
+        .transport = wifi ? wifi_phy_transport() : serial_phy_transport(),
         .cb = {
             .on_register        = od_on_register,
             .on_regack          = od_on_regack,
             .on_publish         = od_on_publish,
             .get_client_id      = od_get_client_id,
-            .load_addrs         = od_load_addrs,
+            .load_addrs         = wifi ? wifi_load_addrs : od_load_addrs,
             .store_node_addr    = od_store_node_addr,
         },
         .now_ms = now_ms,
         .rand16 = rand16,
     };
-    mqttsn_client_init(&cfg);
+    // WiFi: the client starts with the first IP; the PLC runs from the start anyway
+    bool started = !wifi;
+    if (started) {
+        mqttsn_client_init(&cfg);
+    }
 
     int64_t next_poll = now_ms();
     for (;;) {
@@ -194,15 +249,27 @@ static void node_task(void *arg)
             }
         }
 
-        rx_msg_t rx;
-        if (xQueueReceive(s_rx_queue, &rx, wait) == pdTRUE) {
-            mqttsn_client_handle_rx(NULL, rx.msg, rx.len);  // Serial link, no addresses
+        node_event_t ev;
+        if (xQueueReceive(s_events, &ev, wait) == pdTRUE) {
+            if (ev.kind == EV_IP) {
+                // A new address restarts the session. A lost one does not: sends fail until the station
+                // is back, and a long outage ends as with a silent gateway.
+                if ((ev.len == 4) && (!started || (memcmp(s_ip, ev.msg, 4) != 0))) {
+                    memcpy(s_ip, ev.msg, 4);
+                    mqttsn_client_init(&cfg);
+                    started = true;
+                }
+            } else if (started) {
+                mqttsn_client_handle_rx(ev.has_src ? &ev.src : NULL, ev.msg, ev.len);
+            }
         }
 
         int64_t now = now_ms();
         if (now >= next_poll) {
             od_poll();
-            mqttsn_client_tick();
+            if (started) {
+                mqttsn_client_tick();
+            }
 
             next_poll += POLL_PERIOD_MS;
             if (next_poll <= now) {
@@ -221,16 +288,17 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
-    node_cfg_t cfg;
-    load_cfg(&cfg);
+    load_cfg(&s_cfg);
+    const node_cfg_if_t *phy = &s_cfg.ifs[0];
+    const bool wifi = (phy->type == NODE_CFG_IF_WIFI);
 
     // Pins and ports the PLC program must not touch: flash, console, interfaces
     plc_config_t plc_cfg = {
         .reserved_pins  = FLASH_PINS | console_pins(),
         .reserved_uarts = console_uarts(),
     };
-    for (size_t i = 0; i < cfg.n_ifs; i++) {
-        const node_cfg_if_t *itf = &cfg.ifs[i];
+    for (size_t i = 0; i < s_cfg.n_ifs; i++) {
+        const node_cfg_if_t *itf = &s_cfg.ifs[i];
         if (itf->type == NODE_CFG_IF_UART) {
             plc_cfg.reserved_pins |= pin_bit(itf->tx) | pin_bit(itf->rx) | pin_bit(itf->de);
             plc_cfg.reserved_uarts |= (uint8_t)(1u << itf->port);
@@ -238,30 +306,53 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(plc_init(&plc_cfg));
 
+    // WiFi: the default name from the MAC, an IP from DHCP would change it
+    static char mac_suffix[7];
+    if (wifi) {
+        uint8_t mac[6];
+        ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
+        snprintf(mac_suffix, sizeof(mac_suffix), "%02X%02X%02X", mac[3], mac[4], mac[5]);
+    }
+
     static const od_provider_t *providers[1];
     providers[0] = plc_provider();
     const od_config_t od_cfg = {
-        .device_type    = device_type(&cfg),
+        .device_type    = device_type(&s_cfg),
         .providers      = providers,
         .n_providers    = 1,
-        .cfg_generation = cfg.generation,
-        .node_name      = cfg.name,
-        .node_id        = cfg.node_addr,
+        .cfg_generation = s_cfg.generation,
+        .node_name      = s_cfg.name,
+        .node_id        = s_cfg.node_addr,
+        .name_suffix    = wifi ? mac_suffix : NULL,
+        .phy1_addr      = wifi ? wifi_phy1_addr : NULL,
     };
     ESP_ERROR_CHECK(od_init(&od_cfg));
 
-    s_rx_queue = xQueueCreate(RX_QUEUE_LEN, sizeof(rx_msg_t));
-    ESP_ERROR_CHECK(s_rx_queue != NULL ? ESP_OK : ESP_ERR_NO_MEM);
+    s_events = xQueueCreate(EVENT_QUEUE_LEN, sizeof(node_event_t));
+    ESP_ERROR_CHECK(s_events != NULL ? ESP_OK : ESP_ERR_NO_MEM);
 
-    const node_cfg_if_t *phy = &cfg.ifs[0];
-    const serial_phy_config_t phy_cfg = {
-        .uart_port  = phy->port,
-        .tx_pin     = phy->tx,
-        .rx_pin     = phy->rx,
-        .de_pin     = (phy->de != NODE_CFG_NO_PIN) ? phy->de : -1,
-        .baud_rate  = (int)phy->baud,
-    };
-    ESP_ERROR_CHECK(serial_phy_init(&phy_cfg, on_serial_rx, NULL));
+    if (wifi) {
+        const node_cfg_wifi_t *w = &s_cfg.wifi;
+        wifi_phy_config_t wifi_cfg = {
+            .ssid       = w->ssid,
+            .password   = w->password,
+            .static_ip  = w->static_ip,
+            .gw_port    = w->mqttsn_gw_set ? w->mqttsn_gw_port : WIFI_PHY_PORT,
+        };
+        memcpy(wifi_cfg.ip, w->ip, 4);
+        memcpy(wifi_cfg.mask, w->mask, 4);
+        memcpy(wifi_cfg.gateway, w->gateway, 4);
+        ESP_ERROR_CHECK(wifi_phy_init(&wifi_cfg, on_udp_rx, on_wifi_ip, NULL));
+    } else {
+        const serial_phy_config_t serial_cfg = {
+            .uart_port  = phy->port,
+            .tx_pin     = phy->tx,
+            .rx_pin     = phy->rx,
+            .de_pin     = (phy->de != NODE_CFG_NO_PIN) ? phy->de : -1,
+            .baud_rate  = (int)phy->baud,
+        };
+        ESP_ERROR_CHECK(serial_phy_init(&serial_cfg, on_serial_rx, NULL));
+    }
 
     BaseType_t ok = xTaskCreate(node_task, "node", NODE_TASK_STACK, NULL, NODE_TASK_PRIO, NULL);
     ESP_ERROR_CHECK(ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);

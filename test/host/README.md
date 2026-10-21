@@ -16,6 +16,7 @@ CC=clang python test/host/run.py        # компилятор: $CC, по умо
 | `cfg` (`test_cfg.c`) | Раздел `cfg`: пример из [docs/cfg-format.md](../../docs/cfg-format.md), ошибки заголовка и записей, проверка пинов и портов |
 | `cfg_gen` | Генератор `tools/mkcfg.py` воспроизводит тот же пример |
 | `e2e` (`e2e.py`) | MQTT-SN: подключение, потеря и возврат шлюза, перезагрузка, новый `cfg` и смена типа — узел `host_node` против `tools/gw_sim.py` |
+| `e2e_udp` (`e2e_udp.py`) | MQTT-SN по UDP, как WiFi в `main.c`: адреса IPv4, поиск шлюза, имя из MAC, PHY1 = IP, чужие адреса |
 | `e2e_plc` (`e2e_plc.py`) | PLC через `pa1`: загрузка как в Enviriot, мерке́ры, отчёт об ошибке, сохранение, ввод-вывод при перезапуске |
 
 `host_node` — узел целиком (MQTT-SN, Object Dictionary, PLC) с моделируемым временем; `harness.py` гоняет

@@ -2,8 +2,9 @@
 // in-memory NVS and program storage, fake IO hardware.
 // Line protocol on stdin: "rx <hex>", "tick <n>", "status", "reboot", "packtest", "hw" (IO calls
 // since the last "hw"), "level <pin>", "set <pin> <0|1>", "cfg <generation> <node id hex> <device type>
-// [name]" (cfg partition from the next "reboot"), "quit".
-// Output: "tx <hex frame>" lines, other results, then "ok".
+// [name]" (cfg partition from the next "reboot"), "udp-phy <ip hex> <name suffix> [gateway ip hex]" (WiFi
+// as main.c from the next "reboot": 4-byte addresses), "udprx <src ip hex> <message hex>", "quit".
+// Output: "tx <hex frame>" (serial) or "udp <dst ip hex> <message hex>" lines, other results, then "ok".
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,6 +87,45 @@ static const mqttsn_transport_t transport = {
     .set_addr = NULL,
 };
 
+// WiFi as main.c: the node address is its IP, the gateway from cfg or searched
+static struct { int on; uint8_t ip[4]; char suffix[8]; int gw_set; uint8_t gw[4]; } udp;
+
+static bool udp_send(void *ctx, const mqttsn_addr_t *dst, const uint8_t *msg, size_t len)
+{
+    (void)ctx;
+    printf("udp ");
+    for (size_t i = 0; i < dst->len; i++) printf("%02x", dst->b[i]);
+    printf(" ");
+    for (size_t i = 0; i < len; i++) printf("%02x", msg[i]);
+    printf("\n");
+    return true;
+}
+
+static const mqttsn_transport_t udp_transport = {
+    .broadcast = { .len = 4, .b = { 255, 255, 255, 255 } },
+    .undef = { .len = 4, .b = { 0, 0, 0, 0 } },
+    .send = udp_send,
+    .set_addr = NULL,
+};
+
+static void udp_load_addrs(mqttsn_addr_t *node, mqttsn_addr_t *gateway)
+{
+    node->len = gateway->len = 4;
+    memcpy(node->b, udp.ip, 4);
+    memset(gateway->b, 0, 4);
+    if (udp.gw_set) memcpy(gateway->b, udp.gw, 4);
+}
+
+static size_t udp_phy1_addr(uint8_t *buf, size_t max) { size_t n = max < 4 ? max : 4; memcpy(buf, udp.ip, n); return n; }
+
+static int parse_ip(const char *hex, uint8_t *ip)
+{
+    unsigned b[4];
+    if (sscanf(hex, "%2x%2x%2x%2x", &b[0], &b[1], &b[2], &b[3]) != 4) return 0;
+    for (int i = 0; i < 4; i++) ip[i] = (uint8_t)b[i];
+    return 1;
+}
+
 // cfg partition as main.c passes it to od_init()
 static struct { uint32_t generation; unsigned node_id; char device_type[16]; char name[24]; } node_cfg = {
     0, 0xFF, "E1S10.400", "",
@@ -104,11 +144,13 @@ static void start(void)
     const od_config_t od_cfg = {
         .device_type = node_cfg.device_type, .providers = providers, .n_providers = 1,
         .cfg_generation = node_cfg.generation, .node_name = node_cfg.name, .node_id = (uint8_t)node_cfg.node_id,
+        .name_suffix = udp.on ? udp.suffix : NULL, .phy1_addr = udp.on ? udp_phy1_addr : NULL,
     };
     if (od_init(&od_cfg) != ESP_OK) { fprintf(stderr, "od_init failed\n"); exit(1); }
     const mqttsn_client_config_t cfg = {
-        .transport = &transport,
-        .cb = { od_on_register, od_on_regack, od_on_publish, od_get_client_id, od_load_addrs, od_store_node_addr },
+        .transport = udp.on ? &udp_transport : &transport,
+        .cb = { od_on_register, od_on_regack, od_on_publish, od_get_client_id, udp.on ? udp_load_addrs : od_load_addrs,
+                od_store_node_addr },
         .now_ms = now_ms, .rand16 = rand16,
     };
     mqttsn_client_init(&cfg);
@@ -191,6 +233,23 @@ int main(void)
             int pin = 0, level = 0;
             sscanf(line + 4, "%d %d", &pin, &level);
             fake_level[pin % PLC_HW_PINS] = level != 0;
+        } else if (!strncmp(line, "udp-phy ", 8)) {
+            char ip[16] = "", gw[16] = "";
+            udp.suffix[0] = 0;
+            int n = sscanf(line + 8, "%15s %7s %15s", ip, udp.suffix, gw);
+            udp.on = n >= 2 && parse_ip(ip, udp.ip);
+            udp.gw_set = n == 3 && parse_ip(gw, udp.gw);
+        } else if (!strncmp(line, "udprx ", 6)) {
+            mqttsn_addr_t src = { .len = 4 };
+            uint8_t m[256];
+            size_t len = 0;
+            const char *p = line + 6;
+            if (parse_ip(p, src.b)) {
+                for (p += 9; p[0] && p[1] && len < sizeof m; p += 2) {
+                    unsigned b; sscanf(p, "%2x", &b); m[len++] = (uint8_t)b;
+                }
+                mqttsn_client_handle_rx(&src, m, len);
+            }
         } else if (!strncmp(line, "cfg ", 4)) {
             node_cfg.name[0] = '\0';
             sscanf(line + 4, "%" SCNu32 " %x %15s %23s", &node_cfg.generation, &node_cfg.node_id, node_cfg.device_type,

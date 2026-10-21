@@ -11,14 +11,17 @@ const BAUD = 460800;                    // Once the flasher stub runs; the ROM t
 const STORE_FORM = 'espnode.form';
 const MAX_IFS = 4;
 
-// What this firmware runs; the page and the firmware are published from one commit. WiFi (TODO §2), RS-485
-// and gateway interfaces (§3) unlock here.
-const FIRMWARE = { types: ['uart'], interfaces: 1 };
+// What this firmware runs; the page and the firmware are published from one commit. RS-485 and gateway
+// interfaces (TODO §3) unlock here.
+const FIRMWARE = { types: ['uart', 'wifi'], interfaces: 1 };
+// WiFi networks typed here: [{ ssid, password? }], newest first
+const STORE_WIFI = 'espnode.wifi';
+const WIFI_SAVED_MAX = 10;
 
 // Interface rows: uart - X13 serial (SLIP), rs485 - X13 RS-485 (F0 1C), wifi
 const IF_DEFAULTS = {
     uart: { type: 'uart', port: 0, tx: 1, rx: 3 },
-    wifi: { type: 'wifi', ssid: '', password: '', ip: '', router: '', gateway: '' },
+    wifi: { type: 'wifi', ssid: '', password: '', ip: '', router: '', gateway: '', remember: false },
     rs485: { type: 'rs485', port: 1, tx: 17, rx: 16, de: 4 },
 };
 // The speed comes with the type: X13 serial as the serial gateway of Enviriot, X13 RS-485
@@ -33,10 +36,10 @@ const FIELDS = {
     uart: [['port', 'f.port', 'port'], ['tx', 'f.tx', 'pin'], ['rx', 'f.rx', 'pin']],
     rs485: [['port', 'f.port', 'port'], ['tx', 'f.tx', 'pin'], ['rx', 'f.rx', 'pin'], ['de', 'f.de', 'pin']],
     wifi: [['ssid', 'f.ssid', 'text'], ['password', 'f.password', 'password'], ['ip', 'f.ip', 'text', 'f.ip.dhcp'],
-           ['router', 'f.router', 'text'], ['gateway', 'f.gw', 'text', 'f.gw.search']],
+           ['router', 'f.router', 'text'], ['gateway', 'f.gw', 'text', 'f.gw.search'], ['remember', 'f.remember', 'check']],
 };
 // Data of the user, not part of a template: editing them keeps the template
-const OWN_DATA = ['ssid', 'password', 'ip', 'router', 'gateway'];
+const OWN_DATA = ['ssid', 'password', 'ip', 'router', 'gateway', 'remember'];
 
 const $ = id => document.getElementById(id);
 const copy = rows => rows.map(r => ({ ...r }));
@@ -109,6 +112,24 @@ function sizeBytes(s) {
 }
 
 ////////////////////////////////////////////////////////////////////////
+// Saved WiFi networks: per browser, the password only when asked to remember it
+
+function savedNetworks() {
+    const list = storeGet(STORE_WIFI);
+    return Array.isArray(list) ? list.filter(n => n && typeof n.ssid === 'string') : [];
+}
+
+function saveNetwork(ssid, password) {
+    const net = password === null ? { ssid } : { ssid, password };
+    storeSet(STORE_WIFI, [net, ...savedNetworks().filter(n => n.ssid !== ssid)].slice(0, WIFI_SAVED_MAX));
+    renderSaved();
+}
+
+function renderSaved() {
+    $('wifi-saved').replaceChildren(...savedNetworks().map(n => new Option('', n.ssid)));
+}
+
+////////////////////////////////////////////////////////////////////////
 // Interfaces and templates
 
 const runs = rows => rows.length <= FIRMWARE.interfaces && rows.every(r => FIRMWARE.types.includes(r.type));
@@ -127,6 +148,7 @@ function rowsOf(cfg) {
         type: 'wifi', ssid: w.ssid, password: w.password,
         ip: w.ip ? formatIpMask(w.ip.ip, w.ip.mask) : '', router: w.ip ? formatIpv4(w.ip.gateway) : '',
         gateway: w.gateway ? formatHostPort(w.gateway) : '',
+        remember: Boolean(savedNetworks().find(n => n.ssid === w.ssid)?.password),
     } : {
         type: i.framing === 'rs485' ? 'rs485' : 'uart', port: i.port, tx: i.tx, rx: i.rx, de: i.de,
     }));
@@ -135,7 +157,8 @@ function rowsOf(cfg) {
 // cfg of the page, or { error } of a field the generator cannot take
 function toCfg(generation) {
     const num = s => (String(s ?? '').trim() === '' ? null : Number(s));
-    const addr = num($('f-addr').value);
+    // On WiFi the address is the IP, the field is hidden
+    const addr = state.ifs[0]?.type === 'wifi' ? null : num($('f-addr').value);
     const cfg = {
         generation, name: $('f-name').value.trim(), nodeAddr: addr ?? ADDR_DHCP, wifi: null,
         interfaces: state.ifs.map(r => (r.type === 'wifi' ? { type: 'wifi' } : {
@@ -184,6 +207,14 @@ function fieldInput(row, [key, , kind, placeholder]) {
         for (const p of [0, 1, 2]) {
             el.add(new Option(`UART${p}`, String(p)));
         }
+    } else if (kind === 'check') {
+        el = document.createElement('input');
+        el.type = 'checkbox';
+        el.checked = Boolean(row[key]);
+        el.addEventListener('change', () => {
+            row[key] = el.checked;
+        });
+        return el;
     } else {
         el = document.createElement('input');
         el.type = kind === 'password' ? 'password' : kind === 'text' ? 'text' : 'number';
@@ -192,6 +223,9 @@ function fieldInput(row, [key, , kind, placeholder]) {
             el.max = 39;
         }
         el.autocomplete = 'off';
+        if (key === 'ssid') {
+            el.setAttribute('list', 'wifi-saved');
+        }
         if (placeholder) {
             el.placeholder = t(placeholder);
         } else if (key === 'de') {
@@ -201,6 +235,15 @@ function fieldInput(row, [key, , kind, placeholder]) {
     el.value = row[key] ?? '';
     el.addEventListener('input', () => {
         row[key] = kind === 'text' || kind === 'password' ? el.value : (el.value === '' ? null : Number(el.value));
+        if (key === 'ssid') {                               // A saved network: its password
+            const saved = savedNetworks().find(n => n.ssid === el.value);
+            if (saved?.password !== undefined) {
+                row.password = saved.password;
+                row.remember = true;
+                renderIfaces();
+                return;
+            }
+        }
         if (!OWN_DATA.includes(key)) {
             state.tpl = 'custom';
             renderTemplates();
@@ -253,13 +296,32 @@ function renderIfaces() {
         for (const f of FIELDS[row.type]) {
             const label = document.createElement('label');
             label.className = 'f-' + f[0];
-            label.append(Object.assign(document.createElement('span'), { textContent: t(f[1]) }), fieldInput(row, f));
-            fields.append(label);
+            const text = Object.assign(document.createElement('span'), { textContent: t(f[1]) });
+            if (f[2] === 'check') {
+                label.classList.add('check');
+                label.append(fieldInput(row, f), text);
+                fields.append(label, Object.assign(document.createElement('p'),
+                    { className: 'note', textContent: t(f[1] + '.note') }));
+            } else {
+                label.append(text, fieldInput(row, f));
+                fields.append(label);
+            }
         }
 
         cell.append(head, fields);
         box.append(cell);
     });
+
+    // WiFi: no node address (the IP is), the default name comes from the MAC
+    const wifi = state.ifs[0]?.type === 'wifi';
+    $('addr-field').hidden = wifi;
+    const mac = state.device?.mac;
+    if (wifi && mac) {
+        const letters = state.ifs.map(r => ({ uart: 'S', wifi: 'W', rs485: 'M' })[r.type]).join('');
+        $('f-name').placeholder = `E1${letters}10_${mac.split(':').slice(3).join('').toUpperCase()}`;
+    } else {
+        $('f-name').placeholder = t('f.name.auto');
+    }
     renderTemplates();
 }
 
@@ -455,6 +517,21 @@ async function connect() {
     }
 }
 
+// A file of the manifest, checked: the browser cache may still hold the one of an older build
+async function fetchFile(f) {
+    const r = await fetch(f.path, { cache: 'no-cache' });
+    if (!r.ok) {
+        throw new Error(`${f.path}: HTTP ${r.status}`);
+    }
+    const data = new Uint8Array(await r.arrayBuffer());
+    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))]
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+    if (data.length !== f.size || (f.sha256 && hash !== f.sha256)) {
+        throw new PageError('err.fw', { name: f.path });
+    }
+    return data;
+}
+
 // Firmware of the manifest (and nvs, plc erased if checked) and cfg, or cfg only
 async function write(firmware) {
     if (!runs(state.ifs)) {
@@ -476,11 +553,7 @@ async function write(firmware) {
         if (firmware) {
             setProgress('progress.fetch', {}, 0);
             for (const f of state.manifest.files) {
-                const r = await fetch(f.path);
-                if (!r.ok) {
-                    throw new Error(`${f.path}: HTTP ${r.status}`);
-                }
-                files.push({ name: f.path.split('/').pop(), address: f.offset, data: new Uint8Array(await r.arrayBuffer()) });
+                files.push({ name: f.path.split('/').pop(), address: f.offset, data: await fetchFile(f) });
             }
             // esptool-js erases no regions; written FF is erased flash, compressed it is almost nothing
             if ($('erase').checked) {
@@ -501,7 +574,14 @@ async function write(firmware) {
                 { n: i + 1, count: files.length, name: files[i].name }, (i + written / total) / files.length),
             calculateMD5Hash: md5,                                      // esptool-js compares with the flash
         });
-        storeSet(STORE_FORM, { ifs: state.ifs, addr: $('f-addr').value, name: $('f-name').value });
+        // Passwords stay in the browser only when asked; the form keeps none
+        for (const r of state.ifs.filter(row => row.type === 'wifi' && row.ssid.trim())) {
+            saveNetwork(r.ssid.trim(), r.remember ? r.password : null);
+        }
+        storeSet(STORE_FORM, {
+            ifs: state.ifs.map(r => (r.type === 'wifi' ? { ...r, password: '' } : r)),
+            addr: $('f-addr').value, name: $('f-name').value,
+        });
         setProgress('progress.reset', {}, 1);
         await hardReset(state.transport);
         await closePort();
@@ -563,6 +643,7 @@ async function init() {
     } catch (e) {
         state.message = { kind: 'error', key: 'fw.error', vars: { error: e.message } };
     }
+    renderSaved();
     renderIfaces();
     render();
 }

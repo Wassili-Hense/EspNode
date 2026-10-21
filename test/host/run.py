@@ -1,6 +1,6 @@
 """Build and run the host tests.
 
-    python test/host/run.py [test ...]      tests: vm, io, clock, cfg, cfg_gen, e2e, e2e_plc (default: all)
+    python test/host/run.py [test ...]      tests: vm, io, clock, cfg, cfg_gen, e2e, e2e_plc, e2e_udp (default: all)
 
 C compiler: $CC, default "gcc"; any gcc or clang, e.g. CC=clang or CC="zig cc".
 """
@@ -38,6 +38,7 @@ TESTS = {                               # name: (binary or None, command)
     'cfg_gen': (None, [sys.executable, str(HERE.parents[1] / 'tools' / 'mkcfg.py'), '--selftest']),
     'e2e': ('host_node', [sys.executable, str(HERE / 'e2e.py')]),
     'e2e_plc': ('host_node', [sys.executable, str(HERE / 'e2e_plc.py')]),
+    'e2e_udp': ('host_node', [sys.executable, str(HERE / 'e2e_udp.py')]),
 }
 
 
