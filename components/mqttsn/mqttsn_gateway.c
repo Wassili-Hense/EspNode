@@ -12,8 +12,6 @@
 
 static const char *TAG = "mqttsn_gw";
 
-#define NODE_ADDR           1           // The node on a point-to-point link
-
 static mqttsn_gateway_config_t s;
 
 static bool is_gateway_phy(uint8_t phy)
@@ -26,7 +24,7 @@ void mqttsn_gateway_init(const mqttsn_gateway_config_t *cfg)
     s = *cfg;
 }
 
-void mqttsn_gateway_handle_rx(uint8_t phy, const uint8_t *msg, size_t len)
+void mqttsn_gateway_handle_rx(uint8_t phy, uint8_t src, const uint8_t *msg, size_t len)
 {
     if (!is_gateway_phy(phy) || (len < 2) || (msg[0] < 2) || (msg[0] > len)) {
         return;
@@ -38,10 +36,10 @@ void mqttsn_gateway_handle_rx(uint8_t phy, const uint8_t *msg, size_t len)
     uint8_t type = msg[1];
     switch (type) {
     case MQTTSN_SEARCHGW:
-        // As X13: answered here, for the radius this node has to its gateway
+        // As X13: answered here, for the radius this node has to its gateway, to every node on the link
         if ((msg[0] >= MQTTSN_SIZEOF_SEARCHGW) && ((msg[2] == 0) || (msg[2] == mqttsn_client_radius()))) {
             uint8_t info[MQTTSN_SIZEOF_GWINFO];
-            s.send(phy, info, mqttsn_msg_gwinfo(info, mqttsn_client_gw_id()));
+            s.send(phy, MQTTSN_GATEWAY_ADDR_ALL, info, mqttsn_msg_gwinfo(info, mqttsn_client_gw_id()));
         }
         break;
 
@@ -55,7 +53,7 @@ void mqttsn_gateway_handle_rx(uint8_t phy, const uint8_t *msg, size_t len)
     case MQTTSN_DISCONNECT:
     case MQTTSN_DHCPREQ:
     case MQTTSN_FORWARD: {
-        const uint8_t node_id[] = { phy, NODE_ADDR };
+        const uint8_t node_id[] = { phy, src };
         // A FORWARD of a node further away is longer than its Length field
         size_t n = (type == MQTTSN_FORWARD) ? len : msg[0];
         if (!mqttsn_client_forward(node_id, sizeof(node_id), msg, n)) {
@@ -72,7 +70,7 @@ void mqttsn_gateway_handle_rx(uint8_t phy, const uint8_t *msg, size_t len)
 void mqttsn_gateway_on_forward(const uint8_t *node_id, size_t id_len, const uint8_t *msg, size_t len)
 {
     if ((id_len == 2) && is_gateway_phy(node_id[0])) {
-        s.send(node_id[0], msg, len);
+        s.send(node_id[0], node_id[1], msg, len);
     }
 }
 
@@ -80,7 +78,7 @@ void mqttsn_gateway_on_advertise(const uint8_t *msg, size_t len)
 {
     for (uint8_t phy = MQTTSN_GATEWAY_PHY_MIN; phy <= MQTTSN_GATEWAY_PHY_MAX; phy++) {
         if (is_gateway_phy(phy)) {
-            s.send(phy, msg, len);
+            s.send(phy, MQTTSN_GATEWAY_ADDR_ALL, msg, len);
         }
     }
 }

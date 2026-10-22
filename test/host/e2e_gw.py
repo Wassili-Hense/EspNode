@@ -3,47 +3,21 @@
 The node behind is another host_node (E1S10), frames are passed between "phy2" of the gateway node and
 "rx" of the node behind; gw_sim answers FORWARD as Enviriot, with a device per wireless node id.
 """
-import subprocess
 import sys
 import time
 
 import harness as hn
-from harness import BUILD, NODE, Harness, check, g
+from harness import Harness, check, g
 
 NODE_ID = b'\x02\x01'                   # PHY2, the only node on a point-to-point link
 
 t0 = time.time()
 
 
-class Remote:
-    """The node behind the gateway node."""
-
-    def __init__(self):
-        self.err = open(BUILD / 'node_stderr_e2e_gw_remote.log', 'w')
-        self.p = subprocess.Popen([str(NODE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=self.err, text=True, bufsize=1)
-
-    def cmd(self, line):
-        self.p.stdin.write(line + '\n')
-        self.p.stdin.flush()
-        out = []
-        while True:
-            ln = self.p.stdout.readline()
-            if not ln:
-                return out
-            ln = ln.strip()
-            if ln == 'ok':
-                return out
-            out.append(ln)
-
-    def status(self):
-        return self.cmd('status')[0].split()[1]
-
-
 class GwHarness(Harness):
     def __init__(self):
         super().__init__(log='e2e_gw')
-        self.remote = Remote()
+        self.remote = hn.Node('e2e_gw_remote')
         self.to_remote = []             # (ms, message) gateway node -> node behind
         self.from_remote = []           # (ms, message) node behind -> gateway node
         self.dec2 = g.FrameDecoder()
@@ -126,7 +100,16 @@ h.to_node(g.forward(NODE_ID, big))
 got = [m for _, m in h.to_remote[n:]]
 check(len(big) == 50 and got == [big], f'50-byte message passes whole: {[len(m) for m in got]}')
 
-# 5. Without the own session the node behind is not served
+# 5. A node behind the node behind (RS-485 without an address behind an X13 gateway): FORWARD in FORWARD passes
+#    whole both ways, gw_sim answers its DHCP as Enviriot
+n = len(h.to_remote)
+far = b'\x02\xff'
+h.process(h.cmd('phy2rx ' + g.encode_frame(g.forward(far, bytes([6, g.DHCPREQ, 1, 0x12, 0x34, 1]))).hex()))
+got = [m for _, m in h.to_remote[n:]]
+check(got == [g.forward(far, bytes([6, g.DHCPRESP, 1, 0x12, 0x34, 0x21]))],
+      f'DHCP two gateways away: {[m.hex(" ") for m in got]}')
+
+# 6. Without the own session the node behind is not served
 h.gw.disconnect()
 mark = h.ms
 out = h.cmd('phy2rx ' + g.encode_frame(g.msg(g.PINGREQ)).hex())

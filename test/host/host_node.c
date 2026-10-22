@@ -3,10 +3,12 @@
 // Line protocol on stdin: "rx <hex>", "tick <n>", "status", "reboot", "packtest", "hw" (IO calls
 // since the last "hw"), "level <pin>", "set <pin> <0|1>", "cfg <generation> <node id hex> <device type>
 // [name]" (cfg partition from the next "reboot"), "udp-phy <ip hex> <name suffix> [gateway ip hex]" (WiFi
-// as main.c from the next "reboot": 4-byte addresses), "udprx <src ip hex> <message hex>", "gw-phy <0|1>"
-// (a gateway link PHY2 to an X13 node from the next "reboot"), "phy2rx <hex frame>", "quit".
-// Output: "tx <hex frame>" (serial), "udp <dst ip hex> <message hex>" or "phy2 <hex frame>" (to the node
-// behind) lines, other results, then "ok".
+// as main.c from the next "reboot": 4-byte addresses), "udprx <src ip hex> <message hex>", "gw-phy <0|1|2>"
+// (a gateway link PHY2 from the next "reboot": 1 - serial to an X13 node, 2 - RS-485 bus), "phy2rx <hex
+// frame>", "rs485-phy <0|1>" (PHY1 is an RS-485 bus from the next "reboot"), "busrx <hex RS-485 frame>",
+// "seed <n>" (random numbers: nodes on one bus differ), "quit".
+// Output: "tx <hex frame>" (serial), "udp <dst ip hex> <message hex>", "phy2 <hex frame>" (to the node
+// behind) or "bus <hex RS-485 frame>" lines, other results, then "ok".
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +23,7 @@
 #include "objdict.h"
 #include "od_pack.h"
 #include "plc.h"
+#include "rs485_frame.h"
 #include "serial_frame.h"
 
 // ---------------- fake NVS
@@ -129,17 +132,54 @@ static int parse_ip(const char *hex, uint8_t *ip)
     return 1;
 }
 
-// Gateway link PHY2 to an X13 node, as main.c with a second serial interface
-static int gw_phy_on;
+// RS-485 bus as serial_phy: PHY1 of the node or its gateway link PHY2
+static int bus_phy1;
+static uint8_t bus_addr = 0xFF;         // Own address on the bus
 
-static bool phy2_send(uint8_t phy, const uint8_t *msg, size_t len)
+static bool bus_out(uint8_t dst, const uint8_t *msg, size_t len)
 {
+    uint8_t frame[RS485_FRAME_SIZE(MQTTSN_LINK_MAX_LEN)];
+    size_t n = rs485_frame_encode(msg, len, dst, bus_addr, frame, sizeof frame);
+    printf("bus ");
+    for (size_t i = 0; i < n; i++) printf("%02x", frame[i]);
+    printf("\n");
+    return n > 0;
+}
+
+static bool bus_send(void *ctx, const mqttsn_addr_t *dst, const uint8_t *msg, size_t len)
+{
+    (void)ctx;
+    return bus_out(dst->b[0], msg, len);
+}
+
+static void bus_set_addr(void *ctx, const mqttsn_addr_t *addr) { (void)ctx; bus_addr = addr->b[0]; }
+
+static const mqttsn_transport_t bus_transport = {
+    .broadcast = { .len = 1, .b = { 0x00 } },
+    .undef = { .len = 1, .b = { 0xFF } },
+    .send = bus_send,
+    .set_addr = bus_set_addr,
+};
+
+// Gateway link PHY2, as main.c with a second interface: 1 - serial to an X13 node, 2 - RS-485 bus
+static int gw_phy;
+
+static bool phy2_send(uint8_t phy, uint8_t addr, const uint8_t *msg, size_t len)
+{
+    if (gw_phy == 2) return bus_out(addr, msg, len);
     uint8_t frame[SERIAL_FRAME_ENCODED_MAX(MQTTSN_LINK_MAX_LEN)];
     size_t n = serial_frame_encode(msg, len, frame, sizeof frame);
     printf("phy%u ", phy);
     for (size_t i = 0; i < n; i++) printf("%02x", frame[i]);
     printf("\n");
     return n > 0;
+}
+
+// As main.c: the address from DHCP is also the one on the RS-485 bus behind the node
+static void store_node_addr(const mqttsn_addr_t *node)
+{
+    od_store_node_addr(node);
+    if (gw_phy == 2) bus_addr = node->b[0];
 }
 
 // cfg partition as main.c passes it to od_init()
@@ -163,14 +203,17 @@ static void start(void)
         .name_suffix = udp.on ? udp.suffix : NULL, .phy1_addr = udp.on ? udp_phy1_addr : NULL,
     };
     if (od_init(&od_cfg) != ESP_OK) { fprintf(stderr, "od_init failed\n"); exit(1); }
+    mqttsn_addr_t node_addr, gw_addr;
+    od_load_addrs(&node_addr, &gw_addr);
+    bus_addr = node_addr.b[0];
     const mqttsn_client_config_t cfg = {
-        .transport = udp.on ? &udp_transport : &transport,
+        .transport = udp.on ? &udp_transport : bus_phy1 ? &bus_transport : &transport,
         .cb = { od_on_register, od_on_regack, od_on_publish, od_get_client_id, udp.on ? udp_load_addrs : od_load_addrs,
-                od_store_node_addr, mqttsn_gateway_on_forward, mqttsn_gateway_on_advertise },
+                store_node_addr, mqttsn_gateway_on_forward, mqttsn_gateway_on_advertise },
         .now_ms = now_ms, .rand16 = rand16,
     };
     mqttsn_client_init(&cfg);
-    const mqttsn_gateway_config_t gw_cfg = { .send = phy2_send, .phys = gw_phy_on ? (1u << 2) : 0 };
+    const mqttsn_gateway_config_t gw_cfg = { .send = phy2_send, .phys = gw_phy ? (1u << 2) : 0 };
     mqttsn_gateway_init(&gw_cfg);
 }
 
@@ -219,6 +262,8 @@ int main(void)
     serial_frame_decoder_t dec, dec2;
     serial_frame_decoder_reset(&dec);
     serial_frame_decoder_reset(&dec2);
+    rs485_frame_decoder_t bus_dec;
+    rs485_frame_decoder_reset(&bus_dec);
     char line[1024];
     while (fgets(line, sizeof line, stdin)) {
         line[strcspn(line, "\r\n")] = 0;
@@ -259,15 +304,32 @@ int main(void)
             udp.on = n >= 2 && parse_ip(ip, udp.ip);
             udp.gw_set = n == 3 && parse_ip(gw, udp.gw);
         } else if (!strncmp(line, "gw-phy ", 7)) {
-            gw_phy_on = atoi(line + 7);
+            gw_phy = atoi(line + 7);
         } else if (!strncmp(line, "phy2rx ", 7)) {
             for (const char *p = line + 7; p[0] && p[1]; p += 2) {
                 unsigned b; sscanf(p, "%2x", &b);
                 size_t len = serial_frame_decode(&dec2, (uint8_t)b);
                 if (len) {
-                    mqttsn_gateway_handle_rx(2, dec2.buf, len);
+                    mqttsn_gateway_handle_rx(2, MQTTSN_GATEWAY_ADDR_P2P, dec2.buf, len);
                 }
             }
+        } else if (!strncmp(line, "rs485-phy ", 10)) {
+            bus_phy1 = atoi(line + 10);
+        } else if (!strncmp(line, "busrx ", 6)) {
+            for (const char *p = line + 6; p[0] && p[1]; p += 2) {
+                unsigned b; sscanf(p, "%2x", &b);
+                size_t len = rs485_frame_decode(&bus_dec, (uint8_t)b, bus_addr);
+                if (len) {
+                    const mqttsn_addr_t src = { .len = 1, .b = { bus_dec.src } };
+                    if (bus_phy1) {
+                        mqttsn_client_handle_rx(&src, bus_dec.buf, len);
+                    } else if (gw_phy == 2) {
+                        mqttsn_gateway_handle_rx(2, bus_dec.src, bus_dec.buf, len);
+                    }
+                }
+            }
+        } else if (!strncmp(line, "seed ", 5)) {
+            rng = (uint32_t)strtoul(line + 5, NULL, 0);
         } else if (!strncmp(line, "udprx ", 6)) {
             mqttsn_addr_t src = { .len = 4 };
             uint8_t m[256];

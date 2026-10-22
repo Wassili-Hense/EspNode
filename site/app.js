@@ -12,9 +12,8 @@ const STORE_FORM = 'espnode.form';
 const MAX_IFS = 4;
 
 // What this firmware runs; the page and the firmware are published from one commit. The first interface
-// links the node to its gateway, the further ones make it a gateway for X13 nodes. RS-485 (TODO §3.2)
-// unlocks here.
-const FIRMWARE = { first: ['uart', 'wifi'], gateway: ['uart'], interfaces: MAX_IFS };
+// links the node to its gateway, the further ones make it a gateway for X13 nodes.
+const FIRMWARE = { first: ['uart', 'wifi', 'rs485'], gateway: ['uart', 'rs485'], interfaces: MAX_IFS };
 // WiFi networks typed here: [{ ssid, password? }], newest first
 const STORE_WIFI = 'espnode.wifi';
 const WIFI_SAVED_MAX = 10;
@@ -136,6 +135,8 @@ function renderSaved() {
 // Types the firmware runs at position i
 const typesAt = i => (i === 0 ? FIRMWARE.first : FIRMWARE.gateway);
 const runs = rows => rows.length <= FIRMWARE.interfaces && rows.every((r, i) => typesAt(i).includes(r.type));
+// The node address: on WiFi the IP is, but RS-485 needs one too (the bus address)
+const usesAddr = rows => rows[0]?.type !== 'wifi' || rows.some(r => r.type === 'rs485');
 
 // A further interface: UART on the first free port of 1, 2, 0; TX 17 / RX 16 if free (UART2 pins of devkits)
 function gatewayRow() {
@@ -170,7 +171,7 @@ function rowsOf(cfg) {
 function toCfg(generation) {
     const num = s => (String(s ?? '').trim() === '' ? null : Number(s));
     // On WiFi the address is the IP, the field is hidden
-    const addr = state.ifs[0]?.type === 'wifi' ? null : num($('f-addr').value);
+    const addr = usesAddr(state.ifs) ? num($('f-addr').value) : null;
     const cfg = {
         generation, name: $('f-name').value.trim(), nodeAddr: addr ?? ADDR_DHCP, wifi: null,
         interfaces: state.ifs.map(r => (r.type === 'wifi' ? { type: 'wifi' } : {
@@ -324,9 +325,11 @@ function renderIfaces() {
         box.append(cell);
     });
 
-    // WiFi: no node address (the IP is), the default name comes from the MAC
+    // WiFi: no node address (the IP is) unless there is RS-485, without one a gateway has 0xFF on the bus as
+    // X13; the default name comes from the MAC
     const wifi = state.ifs[0]?.type === 'wifi';
-    $('addr-field').hidden = wifi;
+    $('addr-field').hidden = !usesAddr(state.ifs);
+    $('f-addr').placeholder = t(wifi ? 'f.addr.undef' : 'f.addr.dhcp');
     const mac = state.device?.mac;
     if (wifi && mac) {
         const letters = state.ifs.map(r => ({ uart: 'S', wifi: 'W', rs485: 'M' })[r.type]).join('');

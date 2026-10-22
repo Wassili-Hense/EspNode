@@ -1,5 +1,6 @@
 /*
- * EspNode: X13 MQTT-SN node over a serial link or WiFi; with further interfaces, a gateway for X13 nodes.
+ * EspNode: X13 MQTT-SN node over a serial link, RS-485 or WiFi; with further interfaces, a gateway for
+ * X13 nodes.
  */
 #include <inttypes.h>
 #include <stdio.h>
@@ -47,7 +48,7 @@ static const char *TAG = "espnode";
 typedef struct {
     enum { EV_RX, EV_IP } kind;
     uint8_t         phy;                // EV_RX: 1 - link to the gateway, 2.. - X13 nodes behind this one
-    bool            has_src;            // EV_RX: false on a serial link, it has no addresses
+    bool            has_src;            // EV_RX: false on a serial link (SLIP), it has no addresses
     mqttsn_addr_t   src;
     uint8_t         len;                // EV_IP: 4 - msg holds the IP, 0 - lost
     uint8_t         msg[MQTTSN_LINK_MAX_LEN];
@@ -110,17 +111,13 @@ static void default_cfg(node_cfg_t *cfg)
     };
 }
 
-// Interfaces this version can start: the first an X13 serial link or WiFi, the further ones X13 serial
-// links to nodes behind this one. RS-485 framing and WiFi further on - TODO.md
+// Interfaces this version can start: X13 serial links and RS-485 buses anywhere, WiFi only as the first one
+// (to the gateway): X13 nodes behind this one over WiFi are not supported
 static const char *unsupported(const node_cfg_t *cfg)
 {
-    for (size_t i = 0; i < cfg->n_ifs; i++) {
-        const node_cfg_if_t *itf = &cfg->ifs[i];
-        if ((itf->type == NODE_CFG_IF_WIFI) && (i > 0)) {
+    for (size_t i = 1; i < cfg->n_ifs; i++) {
+        if (cfg->ifs[i].type == NODE_CFG_IF_WIFI) {
             return "WiFi as a gateway interface not supported";
-        }
-        if ((itf->type == NODE_CFG_IF_UART) && (itf->framing != NODE_CFG_FRAMING_SLIP)) {
-            return "RS-485 framing not supported yet";
         }
     }
     return NULL;
@@ -170,19 +167,15 @@ static void post(const node_event_t *ev)
     }
 }
 
-// Called from the serial RX task of a link, arg - its PHY
-static void on_serial_rx(const uint8_t *msg, size_t len, void *arg)
+// Called from the RX task of a link (serial, RS-485, UDP), arg - its PHY; src - the sender, NULL on a
+// serial link
+static void on_link_rx(const mqttsn_addr_t *src, const uint8_t *msg, size_t len, void *arg)
 {
-    node_event_t ev = { .kind = EV_RX, .phy = (uint8_t)(uintptr_t)arg, .len = (uint8_t)len };
-    memcpy(ev.msg, msg, len);
-    post(&ev);
-}
-
-// Called from the UDP RX task
-static void on_udp_rx(const mqttsn_addr_t *src, const uint8_t *msg, size_t len, void *arg)
-{
-    (void)arg;
-    node_event_t ev = { .kind = EV_RX, .phy = 1, .has_src = true, .src = *src, .len = (uint8_t)len };
+    node_event_t ev = { .kind = EV_RX, .phy = (uint8_t)(uintptr_t)arg, .has_src = (src != NULL),
+                        .len = (uint8_t)len };
+    if (src != NULL) {
+        ev.src = *src;
+    }
     memcpy(ev.msg, msg, len);
     post(&ev);
 }
@@ -211,11 +204,22 @@ static void wifi_load_addrs(mqttsn_addr_t *node, mqttsn_addr_t *gateway)
     }
 }
 
-// Gateway: to the X13 node on link phy, from the node task
-static bool gateway_send(uint8_t phy, const uint8_t *msg, size_t len)
+// Gateway: to X13 node addr on link phy, from the node task
+static bool gateway_send(uint8_t phy, uint8_t addr, const uint8_t *msg, size_t len)
 {
     serial_phy_t *serial = s_serial[phy - 1];
-    return (serial != NULL) && serial_phy_send(serial, msg, len);
+    return (serial != NULL) && serial_phy_send(serial, addr, msg, len);
+}
+
+// The address from DHCP is also the one of this node on the RS-485 buses behind it, as X13 objRFNodeId
+static void store_node_addr(const mqttsn_addr_t *node)
+{
+    od_store_node_addr(node);
+    for (size_t i = 1; i < s_cfg.n_ifs; i++) {
+        if (s_serial[i] != NULL) {
+            serial_phy_set_addr(s_serial[i], node->b[0]);
+        }
+    }
 }
 
 // Object 0xFFC1 on WiFi: the IP, as X13 LAN nodes
@@ -240,7 +244,7 @@ static void node_task(void *arg)
             .on_publish         = od_on_publish,
             .get_client_id      = od_get_client_id,
             .load_addrs         = wifi ? wifi_load_addrs : od_load_addrs,
-            .store_node_addr    = od_store_node_addr,
+            .store_node_addr    = store_node_addr,
             .on_forward         = mqttsn_gateway_on_forward,
             .on_advertise       = mqttsn_gateway_on_advertise,
         },
@@ -275,7 +279,8 @@ static void node_task(void *arg)
                     started = true;
                 }
             } else if (ev.phy > 1) {
-                mqttsn_gateway_handle_rx(ev.phy, ev.msg, ev.len);
+                mqttsn_gateway_handle_rx(ev.phy, ev.has_src ? ev.src.b[0] : MQTTSN_GATEWAY_ADDR_P2P, ev.msg,
+                                         ev.len);
             } else if (started) {
                 mqttsn_client_handle_rx(ev.has_src ? &ev.src : NULL, ev.msg, ev.len);
             }
@@ -347,6 +352,10 @@ void app_main(void)
     s_events = xQueueCreate(EVENT_QUEUE_LEN, sizeof(node_event_t));
     ESP_ERROR_CHECK(s_events != NULL ? ESP_OK : ESP_ERR_NO_MEM);
 
+    // Address on RS-485: the node address (DHCP may change it, store_node_addr), 0xFF - none yet
+    mqttsn_addr_t node_addr, gw_addr;
+    od_load_addrs(&node_addr, &gw_addr);
+
     // UART of every serial interface: the first links to the gateway, the further ones to X13 nodes
     mqttsn_gateway_config_t gw_cfg = { .send = gateway_send };
     for (size_t i = 0; i < s_cfg.n_ifs; i++) {
@@ -360,8 +369,10 @@ void app_main(void)
             .rx_pin     = itf->rx,
             .de_pin     = (itf->de != NODE_CFG_NO_PIN) ? itf->de : -1,
             .baud_rate  = (int)itf->baud,
+            .framing    = (itf->framing == NODE_CFG_FRAMING_RS485) ? SERIAL_PHY_RS485 : SERIAL_PHY_SLIP,
+            .addr       = node_addr.b[0],
         };
-        ESP_ERROR_CHECK(serial_phy_init(&serial_cfg, on_serial_rx, (void *)(uintptr_t)(i + 1), &s_serial[i]));
+        ESP_ERROR_CHECK(serial_phy_init(&serial_cfg, on_link_rx, (void *)(uintptr_t)(i + 1), &s_serial[i]));
         if (i > 0) {
             gw_cfg.phys |= (uint8_t)(1u << (i + 1));
         }
@@ -379,7 +390,7 @@ void app_main(void)
         memcpy(wifi_cfg.ip, w->ip, 4);
         memcpy(wifi_cfg.mask, w->mask, 4);
         memcpy(wifi_cfg.gateway, w->gateway, 4);
-        ESP_ERROR_CHECK(wifi_phy_init(&wifi_cfg, on_udp_rx, on_wifi_ip, NULL));
+        ESP_ERROR_CHECK(wifi_phy_init(&wifi_cfg, on_link_rx, on_wifi_ip, (void *)(uintptr_t)1));
     }
 
     BaseType_t ok = xTaskCreate(node_task, "node", NODE_TASK_STACK, NULL, NODE_TASK_PRIO, NULL);

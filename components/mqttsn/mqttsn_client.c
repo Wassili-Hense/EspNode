@@ -284,7 +284,9 @@ static void handle_forward(const uint8_t *msg, size_t len)
     if ((inner[0] < 2) || (inner[0] > len - hdr)) {
         return;
     }
-    s.cfg.cb.on_forward(&msg[MQTTSN_SIZEOF_FORWARD], hdr - MQTTSN_SIZEOF_FORWARD, inner, inner[0]);
+    // A FORWARD for a node behind the next gateway: its Length field is the one of its header, the rest goes too
+    size_t n = (inner[1] == MQTTSN_FORWARD) ? len - hdr : inner[0];
+    s.cfg.cb.on_forward(&msg[MQTTSN_SIZEOF_FORWARD], hdr - MQTTSN_SIZEOF_FORWARD, inner, n);
 }
 
 void mqttsn_client_handle_rx(const mqttsn_addr_t *src, const uint8_t *msg, size_t len)

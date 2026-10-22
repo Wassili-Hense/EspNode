@@ -210,6 +210,7 @@ class Gateway:
         self.rtc_set = False                    # Set the node clock when its session is done
         # Nodes behind this one (a gateway node), by wireless node id, as the MsDevice of each in Enviriot
         self.children: dict[bytes, Gateway] = {}
+        self.next_child_addr = 0x21             # DHCP of the nodes behind: 0x21, 0x22, ...
 
     def _send(self, m: bytes) -> None:
         self.log(f'  -> {MSG_NAMES.get(m[1], hex(m[1]))} {m.hex(" ")}')
@@ -219,16 +220,29 @@ class Gateway:
         self.msg_id = self.msg_id % 0xFFFE + 1
         return self.msg_id
 
+    def _dhcp(self, m: bytes, node_addr: int, send: Callable[[bytes], None]) -> None:
+        hlen = m[5:]
+        addr = b''.join(node_addr.to_bytes(h, 'little') for h in hlen)
+        self.log(f'    DHCP radius {m[2]}, assign 0x{node_addr:02X}')
+        send(msg(DHCPRESP, bytes([self.gw_id]) + m[3:5] + addr))
+
     def handle(self, m: bytes) -> None:
         if len(m) > 5 and m[1] == FORWARD and 3 < m[0] < len(m):
-            node_id = bytes(m[3:m[0]])
-            child = self.children.get(node_id)
-            if child is None:               # DHCP addresses of the nodes behind: 0x21, 0x22, ...
-                child = Gateway(lambda x, nid=node_id: self._send(forward(nid, x)), 0x21 + len(self.children),
-                                self.gw_id, log=lambda s, nid=node_id: self.log(f'  [{nid.hex()}]{s}'), now=self.now)
-                self.children[node_id] = child
+            node_id, inner = bytes(m[3:m[0]]), bytes(m[m[0]:])
             self.log(f'<-  FORWARD {node_id.hex(" ")}')
-            child.handle(bytes(m[m[0]:]))
+            reply = lambda x, nid=node_id: self._send(forward(nid, x))     # noqa: E731
+            if len(inner) >= 5 and inner[1] == DHCPREQ:
+                # As Enviriot: the device of this node answers, a new address to every request. A node without
+                # an address has the id [PHY, 0xFF] on an RS-485 bus: there may be several at once.
+                self._dhcp(inner, self.next_child_addr, reply)
+                self.next_child_addr += 1
+                return
+            child = self.children.get(node_id)
+            if child is None:               # As the device of the node in Enviriot, from its first session
+                child = Gateway(reply, self.node_addr, self.gw_id,
+                                log=lambda s, nid=node_id: self.log(f'  [{nid.hex()}]{s}'), now=self.now)
+                self.children[node_id] = child
+            child.handle(inner)
             return
         if len(m) < 2 or m[0] != len(m):
             self.log(f'<-  malformed {m.hex(" ")}')
@@ -237,10 +251,7 @@ class Gateway:
         self.log(f'<-  {MSG_NAMES.get(t, hex(t))} {m.hex(" ")}')
 
         if t == DHCPREQ:
-            hlen = m[5:]
-            addr = b''.join(self.node_addr.to_bytes(h, 'little') for h in hlen)
-            self.log(f'    DHCP radius {m[2]}, assign 0x{self.node_addr:02X}')
-            self._send(msg(DHCPRESP, bytes([self.gw_id]) + m[3:5] + addr))
+            self._dhcp(m, self.node_addr, self._send)
         elif t == SEARCHGW:
             self.log(f'    radius {m[2]}')
             self._send(msg(GWINFO, bytes([self.gw_id])))
@@ -535,6 +546,11 @@ def selftest() -> None:
     gw.handle(forward(nid, msg(CONNECT, bytes([0x04, 0x01]) + p16(300) + b'E1S10_21')))
     assert sent[-1] == forward(nid, bytes([3, CONNACK, 0]))
     assert gw.children[nid].client_id == 'E1S10_21' and gw.client_id is None
+    # Nodes without an address on an RS-485 bus share the id [PHY, 0xFF]: each request gets a new address,
+    # a device appears with a session
+    gw.handle(forward(b'\x02\xff', bytes([6, DHCPREQ, 1, 0x56, 0x78, 1])))
+    assert sent[-1] == forward(b'\x02\xff', bytes([6, DHCPRESP, 1, 0x56, 0x78, 0x22])), sent[-1].hex()
+    assert list(gw.children) == [nid]
     long_fwd = forward(nid, msg(PUBLISH, bytes(MAX_MSG_LEN - 2)))
     assert len(long_fwd) == MAX_MSG_LEN + 5 and FrameDecoder().feed(encode_frame(long_fwd), now=0.0) == [long_fwd]
 

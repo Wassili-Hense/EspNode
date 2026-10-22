@@ -42,7 +42,7 @@ typedef struct {
     // Store own address assigned by DHCP
     void    (*store_node_addr)(const mqttsn_addr_t *node);
     // Optional, for a gateway of nodes on further links (mqttsn_gateway), while connected:
-    // FORWARD from the gateway, the message for a node behind this one
+    // FORWARD from the gateway, the message for a node behind this one (or a FORWARD for a node further away)
     void    (*on_forward)(const uint8_t *node_id, size_t id_len, const uint8_t *msg, size_t len);
     // ADVERTISE of the own gateway
     void    (*on_advertise)(const uint8_t *msg, size_t len);

@@ -85,6 +85,30 @@ class Harness:
         return [g.MSG_NAMES.get(m[1], hex(m[1])) for t, d, m in self.log if d == who and t >= since]
 
 
+class Node:
+    """Another host_node: a node behind the one of Harness, its frames are passed by the test."""
+
+    def __init__(self, log):
+        self.err = open(BUILD / f'node_stderr_{log}.log', 'w')
+        self.p = subprocess.Popen([str(NODE)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=self.err, text=True, bufsize=1)
+
+    def cmd(self, line):
+        self.p.stdin.write(line + '\n')
+        self.p.stdin.flush()
+        out = []
+        while True:
+            ln = self.p.stdout.readline()
+            if not ln:
+                return out
+            ln = ln.strip()
+            if ln == 'ok':
+                return out
+            out.append(ln)
+
+    def status(self):
+        return self.cmd('status')[0].split()[1]
+
 
 failed = False
 

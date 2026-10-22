@@ -1,6 +1,7 @@
 """Build and run the host tests.
 
-    python test/host/run.py [test ...]      tests: vm, io, clock, cfg, cfg_gen, gw_sim, e2e, e2e_plc, e2e_udp, e2e_gw (default: all)
+    python test/host/run.py [test ...]      tests: vm, io, clock, cfg, rs485, cfg_gen, gw_sim, e2e, e2e_plc, e2e_udp,
+                                            e2e_gw, e2e_rs485 (default: all)
 
 C compiler: $CC, default "gcc"; any gcc or clang, e.g. CC=clang or CC="zig cc".
 """
@@ -26,21 +27,25 @@ BINARIES = {
     'test_io': [HERE / 'test_io.c', HERE / 'fake_hw.c'] + PLC,
     'test_clock': [HERE / 'test_clock.c', COMP / 'objdict/od_clock.c'],
     'test_cfg': [HERE / 'test_cfg.c', COMP / 'node_cfg/node_cfg.c'],
+    'test_rs485': [HERE / 'test_rs485.c', COMP / 'serial_phy/rs485_frame.c'],
     'host_node': [HERE / 'host_node.c', HERE / 'fake_hw.c', HERE / 'fake_store.c', COMP / 'plc/plc.c']
     + PLC + [COMP / f for f in ('mqttsn/mqttsn_client.c', 'mqttsn/mqttsn_gateway.c', 'mqttsn/mqttsn_msg.c', 'objdict/objdict.c',
-                                'objdict/od_pack.c', 'objdict/od_storage.c', 'serial_phy/serial_frame.c')],
+                                'objdict/od_pack.c', 'objdict/od_storage.c', 'serial_phy/serial_frame.c',
+                                'serial_phy/rs485_frame.c')],
 }
 TESTS = {                               # name: (binary or None, command)
     'vm': ('test_vm', [str(BUILD / ('test_vm' + EXE))]),
     'io': ('test_io', [str(BUILD / ('test_io' + EXE))]),
     'clock': ('test_clock', [str(BUILD / ('test_clock' + EXE))]),
     'cfg': ('test_cfg', [str(BUILD / ('test_cfg' + EXE))]),
+    'rs485': ('test_rs485', [str(BUILD / ('test_rs485' + EXE))]),
     'cfg_gen': (None, [sys.executable, str(HERE.parents[1] / 'tools' / 'mkcfg.py'), '--selftest']),
     'gw_sim': (None, [sys.executable, str(HERE.parents[1] / 'tools' / 'gw_sim.py'), '--selftest']),
     'e2e': ('host_node', [sys.executable, str(HERE / 'e2e.py')]),
     'e2e_plc': ('host_node', [sys.executable, str(HERE / 'e2e_plc.py')]),
     'e2e_udp': ('host_node', [sys.executable, str(HERE / 'e2e_udp.py')]),
     'e2e_gw': ('host_node', [sys.executable, str(HERE / 'e2e_gw.py')]),
+    'e2e_rs485': ('host_node', [sys.executable, str(HERE / 'e2e_rs485.py')]),
 }
 
 
