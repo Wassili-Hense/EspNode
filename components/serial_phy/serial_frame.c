@@ -17,7 +17,7 @@ size_t serial_frame_decode(serial_frame_decoder_t *dec, uint8_t byte)
 {
     if (dec->len == 0) {
         // Waiting for the length byte, everything else is noise
-        if ((byte >= 2) && (byte <= MQTTSN_MAX_MSG_LEN)) {
+        if ((byte >= 2) && (byte <= MQTTSN_LINK_MAX_LEN)) {
             dec->len = byte;
             dec->pos = 0;
             dec->esc = false;
@@ -53,7 +53,7 @@ size_t serial_frame_decode(serial_frame_decoder_t *dec, uint8_t byte)
 
 size_t serial_frame_encode(const uint8_t *msg, size_t len, uint8_t *out, size_t out_max)
 {
-    if ((len < 2) || (len > MQTTSN_MAX_MSG_LEN) || (out_max < 2)) {
+    if ((len < 2) || (len > MQTTSN_LINK_MAX_LEN) || (out_max < 2)) {
         return 0;
     }
 

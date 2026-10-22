@@ -1,6 +1,6 @@
 """Build and run the host tests.
 
-    python test/host/run.py [test ...]      tests: vm, io, clock, cfg, cfg_gen, e2e, e2e_plc, e2e_udp (default: all)
+    python test/host/run.py [test ...]      tests: vm, io, clock, cfg, cfg_gen, gw_sim, e2e, e2e_plc, e2e_udp, e2e_gw (default: all)
 
 C compiler: $CC, default "gcc"; any gcc or clang, e.g. CC=clang or CC="zig cc".
 """
@@ -27,7 +27,7 @@ BINARIES = {
     'test_clock': [HERE / 'test_clock.c', COMP / 'objdict/od_clock.c'],
     'test_cfg': [HERE / 'test_cfg.c', COMP / 'node_cfg/node_cfg.c'],
     'host_node': [HERE / 'host_node.c', HERE / 'fake_hw.c', HERE / 'fake_store.c', COMP / 'plc/plc.c']
-    + PLC + [COMP / f for f in ('mqttsn/mqttsn_client.c', 'mqttsn/mqttsn_msg.c', 'objdict/objdict.c',
+    + PLC + [COMP / f for f in ('mqttsn/mqttsn_client.c', 'mqttsn/mqttsn_gateway.c', 'mqttsn/mqttsn_msg.c', 'objdict/objdict.c',
                                 'objdict/od_pack.c', 'objdict/od_storage.c', 'serial_phy/serial_frame.c')],
 }
 TESTS = {                               # name: (binary or None, command)
@@ -36,9 +36,11 @@ TESTS = {                               # name: (binary or None, command)
     'clock': ('test_clock', [str(BUILD / ('test_clock' + EXE))]),
     'cfg': ('test_cfg', [str(BUILD / ('test_cfg' + EXE))]),
     'cfg_gen': (None, [sys.executable, str(HERE.parents[1] / 'tools' / 'mkcfg.py'), '--selftest']),
+    'gw_sim': (None, [sys.executable, str(HERE.parents[1] / 'tools' / 'gw_sim.py'), '--selftest']),
     'e2e': ('host_node', [sys.executable, str(HERE / 'e2e.py')]),
     'e2e_plc': ('host_node', [sys.executable, str(HERE / 'e2e_plc.py')]),
     'e2e_udp': ('host_node', [sys.executable, str(HERE / 'e2e_udp.py')]),
+    'e2e_gw': ('host_node', [sys.executable, str(HERE / 'e2e_gw.py')]),
 }
 
 

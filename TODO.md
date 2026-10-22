@@ -49,17 +49,70 @@
   для всех сайтов `wassili-hense.github.io`. Последняя форма (`espnode.form`) паролей не хранит.
 - [x] Описание для Enviriot: `docs/EspNode.xst` (переименован из `E1S10.xst`) — записи `E1S10` и `E1W10`.
 - [x] На плате (2026-10-21): E1W10 со страницы, узел подключается к Enviriot по WiFi.
-- [ ] Проверить на плате (UDP в Enviriot включён: `/$YS/MQTT-SN/udp`; узел должен быть в подсети одной из
-  сетевых карт Enviriot, иначе SEARCHGW и CONNECT отбрасываются): PLC работает; перезапуск точки доступа —
-  узел возвращается сам; статический IP; шлюз задан явно.
+- [x] Проверено на плате (2026-10-22).
 
-## 3. Прошивка: RS-485 X13 (шаблон «WiFi + RS-485»)
+## 3. Прошивка: шлюз — интерфейсы со второго
 
-- [ ] RS-485 — второй интерфейс, то есть шлюз: узлы X13 на шине работают через этот узел, сообщения
-  упаковываются в FORWARD, как у шлюзовых узлов X13 (PHY2). Enviriot FORWARD понимает (`MsForward`),
-  правки там не нужны. Для своих протоколов (Modbus) программе доступны UART 1/2 (функции 21–23).
+Первый интерфейс подключает узел к шлюзу, следующие делают его шлюзом для узлов X13 на них, как шлюзовые узлы
+X13 с PHY2 (`dev_320/Source/Common/mqttsn.c`: `mqttsn_parser_phyS`, ветка FORWARD в `mqttsn_parser_phyM`).
+Enviriot FORWARD понимает (`MsDevice`, `EncapsulatedMessage`): заводит устройство на каждый `wNodeID` шлюза,
+на DHCPREQ отвечает DHCPACK в FORWARD, ответы устройству заворачивает сам — правки там не нужны. Для своих
+протоколов (Modbus) программе остаются свободные UART (функции 21–23).
+
+### 3.1. Шлюз на UART с SLIP (E1WS10, E1SS10)
+
+Сделан и проверен на плате (2026-10-22): E1WS10 и E1SS10, за шлюзом — узел X13 S4SM13 и EspNode E1S10;
+хостовый тест `e2e_gw` — два узла, настоящий код с обеих сторон.
+
+- [x] Поведение, как в X13. Шлюз работает, только пока своя сессия в CONNECT, иначе сообщения узлов за ним
+  отбрасываются.
+  - От узла на интерфейсе n (PHY n = номер интерфейса + 1):
+    - SEARCHGW → свой GWINFO с `gw_id` своего шлюза;
+    - ADVERTISE и GWINFO — пропустить;
+    - CONNECT, PINGREQ, REGISTER, REGACK, PUBLISH, PUBACK, SUBSCRIBE, DISCONNECT, DHCPREQ, FORWARD →
+      `[len][0xFE][ctrl 0][wNodeID]` + сообщение своему шлюзу.
+  - От своего шлюза:
+    - FORWARD с `wNodeID[0] = n` → без заголовка узлу на интерфейс n;
+    - ADVERTISE при радиусе 1 → на все интерфейсы шлюза.
+- [x] `wNodeID = [n, 1]`: на UART с SLIP адресов нет, узел на линии один, адрес постоянный (X13 ставит свой
+  адрес UART; Enviriot нужна только постоянство). С RS-485 — адрес узла на шине.
+- [x] Буферы линий (декодер кадра, приём UDP, очередь событий) — `MQTTSN_LINK_MAX_LEN` = `MQTTSN_MAX_MSG_LEN` +
+  заголовок FORWARD: сообщения узлов в 50 байт проходят целиком (X13 такие отбрасывал).
+- [x] `components/mqttsn`:
+  - клиент — необязательные колбэки `on_forward`/`on_advertise` (FORWARD и ADVERTISE от шлюза в CONNECT),
+    `mqttsn_client_forward()`, `mqttsn_client_gw_id()`;
+  - новый `mqttsn_gateway.c` (чистый C): `init(send, маска PHY)`, `handle_rx(phy, msg, len)`, `on_forward`,
+    `on_advertise`.
+- [x] `serial_phy` — несколько экземпляров (E1SS10 — два UART): дескриптор из пула на 3 порта,
+  `serial_phy_transport(phy)`, `serial_phy_send(phy, …)`.
+- [x] `main.c`:
+  - первый интерфейс — UART с SLIP или WiFi, следующие — UART с SLIP, по `serial_phy` на каждый;
+  - приём — событие `EV_GW_RX` с номером PHY → `mqttsn_gateway_handle_rx`;
+  - RS-485 и WiFi не первым — пока как испорченный `cfg`.
+- [x] Страница: `FIRMWARE = { first: ['uart', 'wifi'], gateway: ['uart'], interfaces: 4 }`:
+  - типы в ячейке по её месту;
+  - «Добавить интерфейс» активна; новая ячейка — UART на первом свободном порту из 1, 2, 0, TX 17 / RX 16,
+    если свободны;
+  - E1WS10 и E1SS10 — через Custom.
+- [x] `docs/EspNode.xst`: записи `E1WS10` и `E1SS10` с той же частью PLC (решение: записи в xst, а не
+  сопоставление без букв PHY в Enviriot); другие сочетания — по мере надобности.
+- [x] Тесты:
+  - `test/host/e2e_gw.py` — два `host_node`: шлюз (наверх `gw_sim`) и узел за ним (E1S10), кадры между `phy2`
+    шлюза и `rx` узла. `host_node`: `gw-phy`, `phy2rx <hex>`, вывод `phy2 <hex>`. `gw_sim`: FORWARD как в
+    Enviriot (устройство на `wNodeID`, DHCPREQ → DHCPRESP в FORWARD).
+  - Сценарии: узел за шлюзом проходит DHCP → SEARCHGW → CONNECT → регистрацию и публикации; PUBLISH от
+    `gw_sim` доходит; ADVERTISE передаётся; пока шлюз не в CONNECT, узел шлюз не находит; FORWARD с чужим PHY
+    и слишком длинные отбрасываются; сообщение в 50 байт проходит.
+  - Страница: «Добавить интерфейс», типы по месту, `cfg` из двух интерфейсов.
+- [x] На плате (2026-10-22): через E1WS10 (WiFi + UART1 TX 17 / RX 16) к Enviriot подключаются узел X13 S4SM13
+  и узел EspNode E1S10.
+- [x] На плате (2026-10-22): E1SS10 (UART наверх и UART к узлу).
+
+### 3.2. Кадр X13 RS-485 (E1WM10)
+
 - [ ] Транспорт кадра X13 RS-485: `F0 1C LEN DST SRC DATA CRC`, 200000 бод, передача только при свободной
-  шине, DE.
+  шине, DE. Узлов на шине несколько: `wNodeID = [n, адрес узла]`.
+- [ ] Страница: тип RS-485 и шаблон E1WM10 (RS-485 — UART1, TX 17, RX 16, DE 4); запись `E1WM10` в xst.
 
 ## 4. GitHub Actions
 

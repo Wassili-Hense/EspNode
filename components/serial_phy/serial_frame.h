@@ -1,7 +1,8 @@
 /*
  * X13 serial framing: [Length] [escaped message] [0xC0]
  *
- * Length is the MQTT-SN message length (sent as is, always < 0xC0). Message bytes 0xC0 and 0xDB
+ * Length is the length of the contents: the MQTT-SN message, or a FORWARD with the message of a node
+ * behind this one (sent as is, always < 0xC0). Message bytes 0xC0 and 0xDB
  * are sent as 0xDB, byte ^ 0x20. Compatible with X13 uart_phy (UART_PHY_SLEEP variant).
  */
 #pragma once
@@ -27,7 +28,7 @@ typedef struct {
     uint8_t len;                        // Expected message length, 0 - waiting for a frame
     uint8_t pos;                        // Message bytes received
     bool    esc;
-    uint8_t buf[MQTTSN_MAX_MSG_LEN];
+    uint8_t buf[MQTTSN_LINK_MAX_LEN];
 } serial_frame_decoder_t;
 
 void serial_frame_decoder_reset(serial_frame_decoder_t *dec);

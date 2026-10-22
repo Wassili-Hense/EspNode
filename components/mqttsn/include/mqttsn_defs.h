@@ -16,6 +16,11 @@ extern "C" {
 #define MQTTSN_MSG_SIZE             48
 // Largest complete message: Length + MsgType + variable part
 #define MQTTSN_MAX_MSG_LEN          (MQTTSN_MSG_SIZE + 2)
+// FORWARD of X13 gateway nodes: [Length of the header][0xFE][Ctrl][wireless node id] + the message
+#define MQTTSN_SIZEOF_FORWARD       3
+#define MQTTSN_FWD_NODE_ID_MAX      5       // PHY number + address on that link (up to IPv4)
+// Longest message on a link: a complete one in FORWARD, to or from a node behind this one
+#define MQTTSN_LINK_MAX_LEN         (MQTTSN_MAX_MSG_LEN + MQTTSN_SIZEOF_FORWARD + MQTTSN_FWD_NODE_ID_MAX)
 
 #define MQTTSN_PROTOCOL_ID          0x01
 #define MQTTSN_CLIENT_ID_MAX        23
@@ -98,7 +103,7 @@ extern "C" {
 
 _Static_assert(MQTTSN_SIZEOF_CONNECT + MQTTSN_CLIENT_ID_MAX <= MQTTSN_MAX_MSG_LEN,
                "MQTTSN_MSG_SIZE too small for CONNECT");
-_Static_assert(MQTTSN_MAX_MSG_LEN < 0xC0, "Message length must not collide with frame delimiter");
+_Static_assert(MQTTSN_LINK_MAX_LEN < 0xC0, "Message length must not collide with frame delimiter");
 
 #ifdef __cplusplus
 }

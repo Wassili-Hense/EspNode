@@ -27,6 +27,9 @@ static inline void mqttsn_put_u16(uint8_t *p, uint16_t val)
 // Builders write a complete message into buf (MQTTSN_MAX_MSG_LEN bytes) and return its length,
 // 0 if the variable part doesn't fit.
 size_t mqttsn_msg_searchgw(uint8_t *buf, uint8_t radius);
+size_t mqttsn_msg_gwinfo(uint8_t *buf, uint8_t gw_id);
+// The message of a node behind this one in FORWARD; buf of MQTTSN_LINK_MAX_LEN bytes
+size_t mqttsn_msg_forward(uint8_t *buf, const uint8_t *node_id, size_t id_len, const uint8_t *msg, size_t len);
 size_t mqttsn_msg_connect(uint8_t *buf, uint8_t flags, uint16_t duration,
                           const uint8_t *client_id, size_t id_len);
 size_t mqttsn_msg_register(uint8_t *buf, uint16_t topic_id, uint16_t msg_id,

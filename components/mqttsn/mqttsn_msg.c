@@ -32,6 +32,26 @@ size_t mqttsn_msg_searchgw(uint8_t *buf, uint8_t radius)
     return finish(buf, MQTTSN_SEARCHGW, MQTTSN_SIZEOF_SEARCHGW);
 }
 
+size_t mqttsn_msg_gwinfo(uint8_t *buf, uint8_t gw_id)
+{
+    buf[2] = gw_id;
+    return finish(buf, MQTTSN_GWINFO, MQTTSN_SIZEOF_GWINFO);
+}
+
+size_t mqttsn_msg_forward(uint8_t *buf, const uint8_t *node_id, size_t id_len, const uint8_t *msg, size_t len)
+{
+    size_t hdr = MQTTSN_SIZEOF_FORWARD + id_len;
+    if ((id_len == 0) || (id_len > MQTTSN_FWD_NODE_ID_MAX) || (hdr + len > MQTTSN_LINK_MAX_LEN)) {
+        return 0;
+    }
+    buf[0] = (uint8_t)hdr;                  // Length of the header only, the message follows
+    buf[1] = MQTTSN_FORWARD;
+    buf[2] = 0;                             // Ctrl, X13: radius / TTL, unused
+    memcpy(&buf[MQTTSN_SIZEOF_FORWARD], node_id, id_len);
+    memcpy(&buf[hdr], msg, len);
+    return hdr + len;
+}
+
 size_t mqttsn_msg_connect(uint8_t *buf, uint8_t flags, uint16_t duration,
                           const uint8_t *client_id, size_t id_len)
 {

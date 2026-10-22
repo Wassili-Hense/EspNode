@@ -23,6 +23,7 @@ END = 0xC0
 ESC = 0xDB
 ESC_XOR = 0x20
 MAX_MSG_LEN = 50            # MQTTSN_MAX_MSG_LEN
+LINK_MAX_LEN = MAX_MSG_LEN + 3 + 5      # MQTTSN_LINK_MAX_LEN: a message of a node behind a gateway in FORWARD
 RX_TIMEOUT = 0.1            # Max pause between bytes of one frame, s
 
 # Message types
@@ -34,12 +35,14 @@ SUBSCRIBE, SUBACK = 0x12, 0x13
 PINGREQ, PINGRESP = 0x16, 0x17
 DISCONNECT = 0x18
 DHCPREQ, DHCPRESP = 0x43, 0x44
+FORWARD = 0xFE
 
 MSG_NAMES = {
     ADVERTISE: 'ADVERTISE', SEARCHGW: 'SEARCHGW', GWINFO: 'GWINFO', CONNECT: 'CONNECT',
     CONNACK: 'CONNACK', REGISTER: 'REGISTER', REGACK: 'REGACK', PUBLISH: 'PUBLISH',
     PUBACK: 'PUBACK', SUBSCRIBE: 'SUBSCRIBE', SUBACK: 'SUBACK', PINGREQ: 'PINGREQ',
     PINGRESP: 'PINGRESP', DISCONNECT: 'DISCONNECT', DHCPREQ: 'DHCPREQ', DHCPRESP: 'DHCPRESP',
+    FORWARD: 'FORWARD',
 }
 
 FL_DUP, FL_QOS1, FL_RETAIN = 0x80, 0x20, 0x10
@@ -97,8 +100,13 @@ def rtc_decode(data: bytes, century: int) -> datetime | None:
         return None
 
 
+def forward(node_id: bytes, m: bytes) -> bytes:
+    """FORWARD of X13 gateway nodes: [header length] [0xFE] [ctrl] [wireless node id] + the message."""
+    return bytes([3 + len(node_id), FORWARD, 0]) + node_id + m
+
+
 def encode_frame(msg: bytes) -> bytes:
-    if not 2 <= len(msg) <= MAX_MSG_LEN:
+    if not 2 <= len(msg) <= LINK_MAX_LEN:
         raise ValueError(f'message length {len(msg)} out of range')
     out = bytearray([len(msg)])
     for b in msg:
@@ -132,7 +140,7 @@ class FrameDecoder:
         frames = []
         for b in data:
             if self.length == 0:
-                if 2 <= b <= MAX_MSG_LEN:
+                if 2 <= b <= LINK_MAX_LEN:
                     self.length = b
                     self.buf = bytearray()
                     self.count = 0
@@ -200,6 +208,8 @@ class Gateway:
         self.subscribed = False
         self.plc_rx: queue.Queue[bytes] = queue.Queue()     # PLC responses, filled by handle()
         self.rtc_set = False                    # Set the node clock when its session is done
+        # Nodes behind this one (a gateway node), by wireless node id, as the MsDevice of each in Enviriot
+        self.children: dict[bytes, Gateway] = {}
 
     def _send(self, m: bytes) -> None:
         self.log(f'  -> {MSG_NAMES.get(m[1], hex(m[1]))} {m.hex(" ")}')
@@ -210,6 +220,16 @@ class Gateway:
         return self.msg_id
 
     def handle(self, m: bytes) -> None:
+        if len(m) > 5 and m[1] == FORWARD and 3 < m[0] < len(m):
+            node_id = bytes(m[3:m[0]])
+            child = self.children.get(node_id)
+            if child is None:               # DHCP addresses of the nodes behind: 0x21, 0x22, ...
+                child = Gateway(lambda x, nid=node_id: self._send(forward(nid, x)), 0x21 + len(self.children),
+                                self.gw_id, log=lambda s, nid=node_id: self.log(f'  [{nid.hex()}]{s}'), now=self.now)
+                self.children[node_id] = child
+            self.log(f'<-  FORWARD {node_id.hex(" ")}')
+            child.handle(bytes(m[m[0]:]))
+            return
         if len(m) < 2 or m[0] != len(m):
             self.log(f'<-  malformed {m.hex(" ")}')
             return
@@ -505,6 +525,18 @@ def selftest() -> None:
     gw.handle(msg(PUBLISH, bytes([0x30 | FL_TOPICID_PREDEF]) + p16(RTC_TOPIC) + p16(13) + rtc_encode(clock)))
     gw.handle(msg(SUBSCRIBE, bytes([0x20]) + p16(14) + b'#'))
     assert [m[1] for m in sent] == [PUBACK, SUBACK]
+
+    # A node behind a gateway node: a device per wireless node id, DHCP and answers in FORWARD
+    sent.clear()
+    gw = Gateway(sent.append, node_addr=0x10, gw_id=1, log=lambda _: None)
+    nid = b'\x02\x01'
+    gw.handle(forward(nid, bytes([6, DHCPREQ, 1, 0x12, 0x34, 1])))
+    assert sent[-1] == forward(nid, bytes([6, DHCPRESP, 1, 0x12, 0x34, 0x21])), sent[-1].hex()
+    gw.handle(forward(nid, msg(CONNECT, bytes([0x04, 0x01]) + p16(300) + b'E1S10_21')))
+    assert sent[-1] == forward(nid, bytes([3, CONNACK, 0]))
+    assert gw.children[nid].client_id == 'E1S10_21' and gw.client_id is None
+    long_fwd = forward(nid, msg(PUBLISH, bytes(MAX_MSG_LEN - 2)))
+    assert len(long_fwd) == MAX_MSG_LEN + 5 and FrameDecoder().feed(encode_frame(long_fwd), now=0.0) == [long_fwd]
 
     print('selftest passed')
 

@@ -41,6 +41,11 @@ typedef struct {
     void    (*load_addrs)(mqttsn_addr_t *node, mqttsn_addr_t *gateway);
     // Store own address assigned by DHCP
     void    (*store_node_addr)(const mqttsn_addr_t *node);
+    // Optional, for a gateway of nodes on further links (mqttsn_gateway), while connected:
+    // FORWARD from the gateway, the message for a node behind this one
+    void    (*on_forward)(const uint8_t *node_id, size_t id_len, const uint8_t *msg, size_t len);
+    // ADVERTISE of the own gateway
+    void    (*on_advertise)(const uint8_t *msg, size_t len);
 } mqttsn_client_cb_t;
 
 typedef struct {
@@ -71,6 +76,14 @@ bool mqttsn_client_can_send(void);
 bool mqttsn_client_register(uint16_t topic_id, const uint8_t *name, size_t len);
 bool mqttsn_client_publish(uint8_t flags, uint16_t topic_id, const uint8_t *data, size_t len);
 bool mqttsn_client_subscribe(uint8_t flags, const uint8_t *topic, size_t len);
+
+// The message of a node behind this one to the gateway, in FORWARD; not repeated, the node repeats
+// itself. Only while connected; false otherwise or if it does not fit.
+bool mqttsn_client_forward(const uint8_t *node_id, size_t id_len, const uint8_t *msg, size_t len);
+
+// The gateway: its id for GWINFO and the radius it was found with
+uint8_t mqttsn_client_gw_id(void);
+uint8_t mqttsn_client_radius(void);
 
 #ifdef __cplusplus
 }

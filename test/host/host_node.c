@@ -3,8 +3,10 @@
 // Line protocol on stdin: "rx <hex>", "tick <n>", "status", "reboot", "packtest", "hw" (IO calls
 // since the last "hw"), "level <pin>", "set <pin> <0|1>", "cfg <generation> <node id hex> <device type>
 // [name]" (cfg partition from the next "reboot"), "udp-phy <ip hex> <name suffix> [gateway ip hex]" (WiFi
-// as main.c from the next "reboot": 4-byte addresses), "udprx <src ip hex> <message hex>", "quit".
-// Output: "tx <hex frame>" (serial) or "udp <dst ip hex> <message hex>" lines, other results, then "ok".
+// as main.c from the next "reboot": 4-byte addresses), "udprx <src ip hex> <message hex>", "gw-phy <0|1>"
+// (a gateway link PHY2 to an X13 node from the next "reboot"), "phy2rx <hex frame>", "quit".
+// Output: "tx <hex frame>" (serial), "udp <dst ip hex> <message hex>" or "phy2 <hex frame>" (to the node
+// behind) lines, other results, then "ok".
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +16,7 @@
 #include "esp_timer.h"
 #include "fake_hw.h"
 #include "mqttsn_client.h"
+#include "mqttsn_gateway.h"
 #include "nvs.h"
 #include "objdict.h"
 #include "od_pack.h"
@@ -126,6 +129,19 @@ static int parse_ip(const char *hex, uint8_t *ip)
     return 1;
 }
 
+// Gateway link PHY2 to an X13 node, as main.c with a second serial interface
+static int gw_phy_on;
+
+static bool phy2_send(uint8_t phy, const uint8_t *msg, size_t len)
+{
+    uint8_t frame[SERIAL_FRAME_ENCODED_MAX(MQTTSN_LINK_MAX_LEN)];
+    size_t n = serial_frame_encode(msg, len, frame, sizeof frame);
+    printf("phy%u ", phy);
+    for (size_t i = 0; i < n; i++) printf("%02x", frame[i]);
+    printf("\n");
+    return n > 0;
+}
+
 // cfg partition as main.c passes it to od_init()
 static struct { uint32_t generation; unsigned node_id; char device_type[16]; char name[24]; } node_cfg = {
     0, 0xFF, "E1S10.400", "",
@@ -150,10 +166,12 @@ static void start(void)
     const mqttsn_client_config_t cfg = {
         .transport = udp.on ? &udp_transport : &transport,
         .cb = { od_on_register, od_on_regack, od_on_publish, od_get_client_id, udp.on ? udp_load_addrs : od_load_addrs,
-                od_store_node_addr },
+                od_store_node_addr, mqttsn_gateway_on_forward, mqttsn_gateway_on_advertise },
         .now_ms = now_ms, .rand16 = rand16,
     };
     mqttsn_client_init(&cfg);
+    const mqttsn_gateway_config_t gw_cfg = { .send = phy2_send, .phys = gw_phy_on ? (1u << 2) : 0 };
+    mqttsn_gateway_init(&gw_cfg);
 }
 
 // ---------------- od_pack checks
@@ -198,8 +216,9 @@ int main(void)
     setvbuf(stdout, NULL, _IONBF, 0);
     start();
 
-    serial_frame_decoder_t dec;
+    serial_frame_decoder_t dec, dec2;
     serial_frame_decoder_reset(&dec);
+    serial_frame_decoder_reset(&dec2);
     char line[1024];
     while (fgets(line, sizeof line, stdin)) {
         line[strcspn(line, "\r\n")] = 0;
@@ -239,6 +258,16 @@ int main(void)
             int n = sscanf(line + 8, "%15s %7s %15s", ip, udp.suffix, gw);
             udp.on = n >= 2 && parse_ip(ip, udp.ip);
             udp.gw_set = n == 3 && parse_ip(gw, udp.gw);
+        } else if (!strncmp(line, "gw-phy ", 7)) {
+            gw_phy_on = atoi(line + 7);
+        } else if (!strncmp(line, "phy2rx ", 7)) {
+            for (const char *p = line + 7; p[0] && p[1]; p += 2) {
+                unsigned b; sscanf(p, "%2x", &b);
+                size_t len = serial_frame_decode(&dec2, (uint8_t)b);
+                if (len) {
+                    mqttsn_gateway_handle_rx(2, dec2.buf, len);
+                }
+            }
         } else if (!strncmp(line, "udprx ", 6)) {
             mqttsn_addr_t src = { .len = 4 };
             uint8_t m[256];

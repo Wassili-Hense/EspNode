@@ -73,7 +73,7 @@ static void rx_task(void *arg)
         }
         mqttsn_addr_t src = { .len = 4 };
         memcpy(src.b, &from.sin_addr.s_addr, 4);
-        if ((n < 2) || (n > MQTTSN_MAX_MSG_LEN) || (s.has_ip && (memcmp(src.b, s.ip, 4) == 0))) {
+        if ((n < 2) || (n > MQTTSN_LINK_MAX_LEN) || (s.has_ip && (memcmp(src.b, s.ip, 4) == 0))) {
             continue;
         }
         s.rx_cb(&src, buf, (size_t)n, s.arg);

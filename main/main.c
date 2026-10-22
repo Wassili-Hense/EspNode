@@ -1,5 +1,5 @@
 /*
- * EspNode: X13 MQTT-SN node over a serial link or WiFi.
+ * EspNode: X13 MQTT-SN node over a serial link or WiFi; with further interfaces, a gateway for X13 nodes.
  */
 #include <inttypes.h>
 #include <stdio.h>
@@ -18,6 +18,7 @@
 #include "soc/uart_pins.h"
 
 #include "mqttsn_client.h"
+#include "mqttsn_gateway.h"
 #include "node_cfg.h"
 #include "objdict.h"
 #include "plc.h"
@@ -42,18 +43,20 @@ static const char *TAG = "espnode";
 #error "The console uses the default MQTT-SN UART: choose another ESPNODE_UART_PORT or disable the console"
 #endif
 
-// For the node task: a message from the link, or a new IP of the WiFi station
+// For the node task: a message from a link, or a new IP of the WiFi station
 typedef struct {
     enum { EV_RX, EV_IP } kind;
-    bool            has_src;            // EV_RX: false on the serial link, it has no addresses
+    uint8_t         phy;                // EV_RX: 1 - link to the gateway, 2.. - X13 nodes behind this one
+    bool            has_src;            // EV_RX: false on a serial link, it has no addresses
     mqttsn_addr_t   src;
     uint8_t         len;                // EV_IP: 4 - msg holds the IP, 0 - lost
-    uint8_t         msg[MQTTSN_MAX_MSG_LEN];
+    uint8_t         msg[MQTTSN_LINK_MAX_LEN];
 } node_event_t;
 
 static QueueHandle_t s_events;
 static node_cfg_t s_cfg;                // Active configuration
 static uint8_t s_ip[4];                 // IP of the WiFi station, node task only
+static serial_phy_t *s_serial[NODE_CFG_MAX_IFS];   // UART of interface i, PHY i + 1
 
 static int64_t now_ms(void)
 {
@@ -107,14 +110,18 @@ static void default_cfg(node_cfg_t *cfg)
     };
 }
 
-// Interfaces this version can start: one X13 serial link or WiFi. RS-485 and gateway interfaces - TODO.md
+// Interfaces this version can start: the first an X13 serial link or WiFi, the further ones X13 serial
+// links to nodes behind this one. RS-485 framing and WiFi further on - TODO.md
 static const char *unsupported(const node_cfg_t *cfg)
 {
-    if (cfg->n_ifs > 1) {
-        return "gateway interfaces not supported yet";
-    }
-    if ((cfg->ifs[0].type == NODE_CFG_IF_UART) && (cfg->ifs[0].framing != NODE_CFG_FRAMING_SLIP)) {
-        return "RS-485 framing not supported yet";
+    for (size_t i = 0; i < cfg->n_ifs; i++) {
+        const node_cfg_if_t *itf = &cfg->ifs[i];
+        if ((itf->type == NODE_CFG_IF_WIFI) && (i > 0)) {
+            return "WiFi as a gateway interface not supported";
+        }
+        if ((itf->type == NODE_CFG_IF_UART) && (itf->framing != NODE_CFG_FRAMING_SLIP)) {
+            return "RS-485 framing not supported yet";
+        }
     }
     return NULL;
 }
@@ -163,11 +170,10 @@ static void post(const node_event_t *ev)
     }
 }
 
-// Called from the serial RX task
+// Called from the serial RX task of a link, arg - its PHY
 static void on_serial_rx(const uint8_t *msg, size_t len, void *arg)
 {
-    (void)arg;
-    node_event_t ev = { .kind = EV_RX, .len = (uint8_t)len };
+    node_event_t ev = { .kind = EV_RX, .phy = (uint8_t)(uintptr_t)arg, .len = (uint8_t)len };
     memcpy(ev.msg, msg, len);
     post(&ev);
 }
@@ -176,7 +182,7 @@ static void on_serial_rx(const uint8_t *msg, size_t len, void *arg)
 static void on_udp_rx(const mqttsn_addr_t *src, const uint8_t *msg, size_t len, void *arg)
 {
     (void)arg;
-    node_event_t ev = { .kind = EV_RX, .has_src = true, .src = *src, .len = (uint8_t)len };
+    node_event_t ev = { .kind = EV_RX, .phy = 1, .has_src = true, .src = *src, .len = (uint8_t)len };
     memcpy(ev.msg, msg, len);
     post(&ev);
 }
@@ -205,6 +211,13 @@ static void wifi_load_addrs(mqttsn_addr_t *node, mqttsn_addr_t *gateway)
     }
 }
 
+// Gateway: to the X13 node on link phy, from the node task
+static bool gateway_send(uint8_t phy, const uint8_t *msg, size_t len)
+{
+    serial_phy_t *serial = s_serial[phy - 1];
+    return (serial != NULL) && serial_phy_send(serial, msg, len);
+}
+
 // Object 0xFFC1 on WiFi: the IP, as X13 LAN nodes
 static size_t wifi_phy1_addr(uint8_t *buf, size_t max)
 {
@@ -220,7 +233,7 @@ static void node_task(void *arg)
 
     const bool wifi = (s_cfg.ifs[0].type == NODE_CFG_IF_WIFI);
     const mqttsn_client_config_t cfg = {
-        .transport = wifi ? wifi_phy_transport() : serial_phy_transport(),
+        .transport = wifi ? wifi_phy_transport() : serial_phy_transport(s_serial[0]),
         .cb = {
             .on_register        = od_on_register,
             .on_regack          = od_on_regack,
@@ -228,6 +241,8 @@ static void node_task(void *arg)
             .get_client_id      = od_get_client_id,
             .load_addrs         = wifi ? wifi_load_addrs : od_load_addrs,
             .store_node_addr    = od_store_node_addr,
+            .on_forward         = mqttsn_gateway_on_forward,
+            .on_advertise       = mqttsn_gateway_on_advertise,
         },
         .now_ms = now_ms,
         .rand16 = rand16,
@@ -259,6 +274,8 @@ static void node_task(void *arg)
                     mqttsn_client_init(&cfg);
                     started = true;
                 }
+            } else if (ev.phy > 1) {
+                mqttsn_gateway_handle_rx(ev.phy, ev.msg, ev.len);
             } else if (started) {
                 mqttsn_client_handle_rx(ev.has_src ? &ev.src : NULL, ev.msg, ev.len);
             }
@@ -289,8 +306,7 @@ void app_main(void)
     ESP_ERROR_CHECK(err);
 
     load_cfg(&s_cfg);
-    const node_cfg_if_t *phy = &s_cfg.ifs[0];
-    const bool wifi = (phy->type == NODE_CFG_IF_WIFI);
+    const bool wifi = (s_cfg.ifs[0].type == NODE_CFG_IF_WIFI);
 
     // Pins and ports the PLC program must not touch: flash, console, interfaces
     plc_config_t plc_cfg = {
@@ -331,6 +347,27 @@ void app_main(void)
     s_events = xQueueCreate(EVENT_QUEUE_LEN, sizeof(node_event_t));
     ESP_ERROR_CHECK(s_events != NULL ? ESP_OK : ESP_ERR_NO_MEM);
 
+    // UART of every serial interface: the first links to the gateway, the further ones to X13 nodes
+    mqttsn_gateway_config_t gw_cfg = { .send = gateway_send };
+    for (size_t i = 0; i < s_cfg.n_ifs; i++) {
+        const node_cfg_if_t *itf = &s_cfg.ifs[i];
+        if (itf->type != NODE_CFG_IF_UART) {
+            continue;
+        }
+        const serial_phy_config_t serial_cfg = {
+            .uart_port  = itf->port,
+            .tx_pin     = itf->tx,
+            .rx_pin     = itf->rx,
+            .de_pin     = (itf->de != NODE_CFG_NO_PIN) ? itf->de : -1,
+            .baud_rate  = (int)itf->baud,
+        };
+        ESP_ERROR_CHECK(serial_phy_init(&serial_cfg, on_serial_rx, (void *)(uintptr_t)(i + 1), &s_serial[i]));
+        if (i > 0) {
+            gw_cfg.phys |= (uint8_t)(1u << (i + 1));
+        }
+    }
+    mqttsn_gateway_init(&gw_cfg);
+
     if (wifi) {
         const node_cfg_wifi_t *w = &s_cfg.wifi;
         wifi_phy_config_t wifi_cfg = {
@@ -343,15 +380,6 @@ void app_main(void)
         memcpy(wifi_cfg.mask, w->mask, 4);
         memcpy(wifi_cfg.gateway, w->gateway, 4);
         ESP_ERROR_CHECK(wifi_phy_init(&wifi_cfg, on_udp_rx, on_wifi_ip, NULL));
-    } else {
-        const serial_phy_config_t serial_cfg = {
-            .uart_port  = phy->port,
-            .tx_pin     = phy->tx,
-            .rx_pin     = phy->rx,
-            .de_pin     = (phy->de != NODE_CFG_NO_PIN) ? phy->de : -1,
-            .baud_rate  = (int)phy->baud,
-        };
-        ESP_ERROR_CHECK(serial_phy_init(&serial_cfg, on_serial_rx, NULL));
     }
 
     BaseType_t ok = xTaskCreate(node_task, "node", NODE_TASK_STACK, NULL, NODE_TASK_PRIO, NULL);

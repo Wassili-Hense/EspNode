@@ -11,9 +11,10 @@ const BAUD = 460800;                    // Once the flasher stub runs; the ROM t
 const STORE_FORM = 'espnode.form';
 const MAX_IFS = 4;
 
-// What this firmware runs; the page and the firmware are published from one commit. RS-485 and gateway
-// interfaces (TODO §3) unlock here.
-const FIRMWARE = { types: ['uart', 'wifi'], interfaces: 1 };
+// What this firmware runs; the page and the firmware are published from one commit. The first interface
+// links the node to its gateway, the further ones make it a gateway for X13 nodes. RS-485 (TODO §3.2)
+// unlocks here.
+const FIRMWARE = { first: ['uart', 'wifi'], gateway: ['uart'], interfaces: MAX_IFS };
 // WiFi networks typed here: [{ ssid, password? }], newest first
 const STORE_WIFI = 'espnode.wifi';
 const WIFI_SAVED_MAX = 10;
@@ -132,7 +133,18 @@ function renderSaved() {
 ////////////////////////////////////////////////////////////////////////
 // Interfaces and templates
 
-const runs = rows => rows.length <= FIRMWARE.interfaces && rows.every(r => FIRMWARE.types.includes(r.type));
+// Types the firmware runs at position i
+const typesAt = i => (i === 0 ? FIRMWARE.first : FIRMWARE.gateway);
+const runs = rows => rows.length <= FIRMWARE.interfaces && rows.every((r, i) => typesAt(i).includes(r.type));
+
+// A further interface: UART on the first free port of 1, 2, 0; TX 17 / RX 16 if free (UART2 pins of devkits)
+function gatewayRow() {
+    const used = state.ifs.filter(r => r.type !== 'wifi');
+    const port = [1, 2, 0].find(n => !used.some(r => r.port === n)) ?? 1;
+    const pins = used.flatMap(r => [r.tx, r.rx, r.de]);
+    const free = !pins.includes(17) && !pins.includes(16);
+    return { type: 'uart', port, tx: free ? 17 : null, rx: free ? 16 : null };
+}
 
 // Template with these rows, the data of the user aside; 'custom' if none
 function templateOf(rows) {
@@ -282,7 +294,7 @@ function renderIfaces() {
         const typeSel = document.createElement('select');
         for (const type of Object.keys(IF_DEFAULTS)) {
             const opt = new Option(t('if.' + type), type);
-            opt.disabled = !FIRMWARE.types.includes(type);
+            opt.disabled = !typesAt(i).includes(type);
             typeSel.add(opt);
         }
         typeSel.value = row.type;
@@ -618,7 +630,7 @@ async function init() {
         input.addEventListener('change', () => setTemplate(input.value));
     }
     $('add-iface').addEventListener('click', () => {
-        state.ifs.push({ ...IF_DEFAULTS[FIRMWARE.types[0]] });
+        state.ifs.push(gatewayRow());
         state.tpl = 'custom';
         renderIfaces();
     });

@@ -273,6 +273,20 @@ static void handle_dhcpresp(const uint8_t *msg, size_t len)
     set_status(MQTTSN_STATUS_DISCONNECTED);     // Restart with the new address
 }
 
+// FORWARD: msg[0] is the length of the header, the message for a node behind this one follows
+static void handle_forward(const uint8_t *msg, size_t len)
+{
+    size_t hdr = msg[0];
+    if ((hdr <= MQTTSN_SIZEOF_FORWARD) || (len < hdr + 2)) {
+        return;
+    }
+    const uint8_t *inner = &msg[hdr];
+    if ((inner[0] < 2) || (inner[0] > len - hdr)) {
+        return;
+    }
+    s.cfg.cb.on_forward(&msg[MQTTSN_SIZEOF_FORWARD], hdr - MQTTSN_SIZEOF_FORWARD, inner, inner[0]);
+}
+
 void mqttsn_client_handle_rx(const mqttsn_addr_t *src, const uint8_t *msg, size_t len)
 {
     if ((len < 2) || (msg[0] < 2) || (msg[0] > len)) {
@@ -282,6 +296,15 @@ void mqttsn_client_handle_rx(const mqttsn_addr_t *src, const uint8_t *msg, size_
 
     if (src == NULL) {
         src = &s.node_addr;             // Point-to-point link
+    }
+
+    // X13: for the nodes behind this one, only while connected
+    if (msg[1] == MQTTSN_FORWARD) {
+        if (mqttsn_addr_eq(src, &s.gw_addr) && (s.status == MQTTSN_STATUS_CONNECT) &&
+            (s.cfg.cb.on_forward != NULL)) {
+            handle_forward(msg, len);
+        }
+        return;
     }
 
     len = msg[0];
@@ -296,6 +319,9 @@ void mqttsn_client_handle_rx(const mqttsn_addr_t *src, const uint8_t *msg, size_
         if ((s.status == MQTTSN_STATUS_SEARCHGW) && (len >= MQTTSN_SIZEOF_ADVERTISE)) {
             gateway_found(src, msg[2]);
             s.radius = 1;
+        } else if (from_gw && (s.status == MQTTSN_STATUS_CONNECT) && (s.radius == 1) &&
+                   (len >= MQTTSN_SIZEOF_ADVERTISE) && (s.cfg.cb.on_advertise != NULL)) {
+            s.cfg.cb.on_advertise(msg, len);       // X13: passed on to the nodes behind this one
         }
         break;
 
@@ -569,4 +595,28 @@ bool mqttsn_client_subscribe(uint8_t flags, const uint8_t *topic, size_t len)
 
     uint8_t msg[MQTTSN_MAX_MSG_LEN];
     return queue_request(msg, mqttsn_msg_subscribe(msg, flags, new_msg_id(), topic, len));
+}
+
+bool mqttsn_client_forward(const uint8_t *node_id, size_t id_len, const uint8_t *msg, size_t len)
+{
+    if (s.status != MQTTSN_STATUS_CONNECT) {
+        return false;
+    }
+    uint8_t buf[MQTTSN_LINK_MAX_LEN];
+    size_t n = mqttsn_msg_forward(buf, node_id, id_len, msg, len);
+    if (n == 0) {
+        return false;
+    }
+    send_msg(&s.gw_addr, buf, n);
+    return true;
+}
+
+uint8_t mqttsn_client_gw_id(void)
+{
+    return s.gw_id;
+}
+
+uint8_t mqttsn_client_radius(void)
+{
+    return s.radius;
 }
