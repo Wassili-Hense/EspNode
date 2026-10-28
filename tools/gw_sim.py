@@ -74,7 +74,8 @@ def plc_crc16(data: bytes, crc: int = 0xFFFF) -> int:
 
 
 # Predefined objects of the node, decoded as strings
-PREDEF_STRINGS = {0xFF00: 'NodeName', 0xFFC0: 'DeviceType'}
+PREDEF_STRINGS = {0xFF00: 'NodeName', 0xFFC0: 'DeviceType', 0xFFE0: 'Log.Debug', 0xFFE1: 'Log.Info',
+                  0xFFE2: 'Log.Warning', 0xFFE3: 'Log.Error'}
 PREDEF_NAMES = {0xFF07: 'RTC', 0xFF10: 'NodeId', 0xFF14: 'GateId', 0xFFC1: 'PHY1addr', 0xFFD8: 'FreePins',
                 0xFFD9: 'FreeUarts', **PREDEF_STRINGS}
 
@@ -276,11 +277,11 @@ class Gateway:
             name = self.topics.get(topic_id, '')
             self.log(f'    {topic_label(topic_id, flags)} {name} QoS{(flags & FL_QOS_MASK) >> 5}'
                      f'{retain}{dup}: {describe_value(topic_id, flags, data)}')
-            if name == PLC_TOPIC and len(data) >= 2:
-                self.log(f'    PLC {PLC_CMDS.get(data[0], hex(data[0]))}, status 0x{data[1]:02X}')
-                self.plc_rx.put(bytes(data))
             if (flags & FL_QOS_MASK) == FL_QOS1:
                 self._send(msg(PUBACK, p16(topic_id) + p16(msg_id) + b'\x00'))
+            if name == PLC_TOPIC and len(data) >= 2:      # After the PUBACK: the waiting upload sends at once
+                self.log(f'    PLC {PLC_CMDS.get(data[0], hex(data[0]))}, status 0x{data[1]:02X}')
+                self.plc_rx.put(bytes(data))
             if (flags & FL_TOPICID_MASK) == FL_TOPICID_PREDEF and topic_id == RTC_TOPIC and len(data) == 6:
                 self._check_rtc(data)
         elif t == SUBSCRIBE:
@@ -422,12 +423,19 @@ def serve(port: str, baud: int, node_addr: int, gw_id: int) -> None:
 
     ser = serial.Serial(port, baud, timeout=0.05)
     lock = threading.Lock()
+    tx_lock = threading.Lock()
 
     def log(text: str) -> None:
         with lock:
             print(f'{time.strftime("%H:%M:%S")} {text}', flush=True)
 
-    gw = Gateway(lambda m: ser.write(encode_frame(m)), node_addr, gw_id, log)
+    # The reader (PUBACK, answers) and the console (commands, upload) both send. pyserial on Windows has one
+    # OVERLAPPED per port for writing: two writes at once break, with "Write timeout", and the reader dies.
+    def send(m: bytes) -> None:
+        with tx_lock:
+            ser.write(encode_frame(m))
+
+    gw = Gateway(send, node_addr, gw_id, log)
     dec = FrameDecoder()
 
     def reader() -> None:

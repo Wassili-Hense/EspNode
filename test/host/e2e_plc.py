@@ -226,6 +226,39 @@ today = (now.year % 100) << 24 | now.month << 16 | now.day << 8 | now.isoweekday
 check(last_value(71) is not None and abs(last_value(71) - secs) <= 1, f'NowSeconds() = {last_value(71)}, gateway {secs}')
 check(last_value(72) == today, f'Today() = {last_value(72)}, gateway {today:#x}')
 
+# Streams to the node log: lines of the init cycle, Info goes although the firmware level is Warning. A 0 byte
+# sends the line at once, the others go after the cycle
+def send(func, stream, *args):          # Last argument first, the stream on top; drop the result
+    code = []
+    for a in reversed(args):
+        code += [0x3B] + list(struct.pack('<I', a))
+    return code + [0x3D, stream & 0xFF, stream >> 8, 0xC6, func, 0x03]
+
+
+def f32(x):
+    return struct.unpack('<I', struct.pack('<f', x))[0]
+
+
+LOG_INIT = (send(24, 0xFFE1, 1234) + send(23, 0xFFE2, ord('T')) + send(23, 0xFFE2, ord('='))
+            + send(25, 0xFFE2, 3, f32(21.456)) + send(23, 0xFFE2, 0) + send(24, 0xFFE2, -7 & 0xFFFFFFFF) + [0xFF])
+LOG_PRG = program_init(LOG_INIT, [0xFF])
+mark = h.ms
+r = plc.upload(LOG_PRG, stack_bottom=0)
+h.run(500)
+logs = [(g.u16(m, 3), m[2], m[7:]) for m in h.node_msgs(mark) if m[1] == g.PUBLISH and 0xFFE0 <= g.u16(m, 3) <= 0xFFE3]
+check(r == bytes([2, 0]) and logs == [(0xFFE2, 0x01, b'T=21.46'), (0xFFE1, 0x01, b'1234'), (0xFFE2, 0x01, b'-7')],
+      f'program lines in the node log, once: {logs}')
+
+# Stop on an error: what the cycle wrote still goes
+LOG_DIV0 = program(*(send(23, 0xFFE3, ord('E')) + [0x3E, 0x38, 0x13, 0xFF]))      # 'E', then 1 / 0
+mark = h.ms
+r = plc.upload(LOG_DIV0, stack_bottom=0)
+h.run(500, until=lambda: any(len(x) == 18 for x in plc.responses(mark)))
+h.run(100)
+rep = [x for x in plc.responses(mark) if len(x) == 18]     # Not the STOP of the upload
+logs = [(g.u16(m, 3), m[7:]) for m in h.node_msgs(mark) if m[1] == g.PUBLISH and 0xFFE0 <= g.u16(m, 3) <= 0xFFE3]
+check(rep and rep[0][1] == 0x86 and logs == [(0xFFE3, b'E')], f'line before the stop on 0x86: {logs}')
+
 h.cmd('quit')
 print(f'{"FAILED" if hn.failed else "ALL PASSED"} in {time.time() - t0:.1f} s real time')
 sys.exit(1 if hn.failed else 0)

@@ -36,6 +36,30 @@ menu "EspNode"
 
     endmenu
 
+    choice ESPNODE_LOG_GATEWAY
+        prompt "Log to the gateway"
+        default ESPNODE_LOG_GATEWAY_WARN
+        help
+            Lines of the ESP-IDF log from this level up go to the gateway, Enviriot writes them to its log
+            (objects 0xFFE0..0xFFE3). Lines of MQTT-SN and of the links are never sent.
+
+        config ESPNODE_LOG_GATEWAY_NONE
+            bool "None"
+        config ESPNODE_LOG_GATEWAY_ERROR
+            bool "Error"
+        config ESPNODE_LOG_GATEWAY_WARN
+            bool "Warning"
+        config ESPNODE_LOG_GATEWAY_INFO
+            bool "Info"
+    endchoice
+
+    config ESPNODE_LOG_GATEWAY_LEVEL
+        int
+        default 4 if ESPNODE_LOG_GATEWAY_NONE
+        default 3 if ESPNODE_LOG_GATEWAY_ERROR
+        default 1 if ESPNODE_LOG_GATEWAY_INFO
+        default 2
+
     config ESPNODE_HW_VERSION
         string "Hardware version"
         default "10"

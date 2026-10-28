@@ -1,7 +1,7 @@
 """Build and run the host tests.
 
-    python test/host/run.py [test ...]      tests: vm, io, clock, cfg, rs485, cfg_gen, gw_sim, e2e, e2e_plc, e2e_udp,
-                                            e2e_gw, e2e_rs485 (default: all)
+    python test/host/run.py [test ...]      tests: vm, io, stream, clock, cfg, rs485, log, cfg_gen, gw_sim, e2e,
+                                            e2e_plc, e2e_udp, e2e_gw, e2e_rs485 (default: all)
 
 C compiler: $CC, default "gcc"; any gcc or clang, e.g. CC=clang or CC="zig cc".
 """
@@ -17,28 +17,32 @@ BUILD = HERE / 'build'
 EXE = '.exe' if os.name == 'nt' else ''
 
 INCLUDE = [HERE / 'stubs', HERE] + [COMP / d for d in (
-    'plc', 'plc/include', 'mqttsn', 'mqttsn/include', 'node_cfg/include', 'objdict', 'objdict/include',
-    'serial_phy', 'serial_phy/include')]
+    'plc', 'plc/include', 'mqttsn', 'mqttsn/include', 'node_cfg/include', 'node_log/include', 'objdict',
+    'objdict/include', 'serial_phy', 'serial_phy/include')]
 FLAGS = ['-std=c11', '-g', '-O1', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter']
 
-PLC = [COMP / 'plc' / f for f in ('plc_vm.c', 'plc_api.c', 'plc_io.c')] + [COMP / 'objdict/od_clock.c']
+PLC = [COMP / 'plc' / f for f in ('plc_vm.c', 'plc_api.c', 'plc_io.c', 'plc_stream.c')] + [COMP / 'objdict/od_clock.c']
 BINARIES = {
     'test_vm': [HERE / 'test_vm.c', COMP / 'plc/plc_vm.c'],
     'test_io': [HERE / 'test_io.c', HERE / 'fake_hw.c'] + PLC,
+    'test_stream': [HERE / 'test_stream.c', HERE / 'fake_hw.c'] + [COMP / 'plc' / f for f in ('plc_io.c', 'plc_stream.c')],
     'test_clock': [HERE / 'test_clock.c', COMP / 'objdict/od_clock.c'],
     'test_cfg': [HERE / 'test_cfg.c', COMP / 'node_cfg/node_cfg.c'],
     'test_rs485': [HERE / 'test_rs485.c', COMP / 'serial_phy/rs485_frame.c'],
+    'test_log': [HERE / 'test_log.c', COMP / 'node_log/node_log.c'],
     'host_node': [HERE / 'host_node.c', HERE / 'fake_hw.c', HERE / 'fake_store.c', COMP / 'plc/plc.c']
     + PLC + [COMP / f for f in ('mqttsn/mqttsn_client.c', 'mqttsn/mqttsn_gateway.c', 'mqttsn/mqttsn_msg.c', 'objdict/objdict.c',
                                 'objdict/od_pack.c', 'objdict/od_storage.c', 'serial_phy/serial_frame.c',
-                                'serial_phy/rs485_frame.c')],
+                                'serial_phy/rs485_frame.c', 'node_log/node_log.c')],
 }
 TESTS = {                               # name: (binary or None, command)
     'vm': ('test_vm', [str(BUILD / ('test_vm' + EXE))]),
     'io': ('test_io', [str(BUILD / ('test_io' + EXE))]),
+    'stream': ('test_stream', [str(BUILD / ('test_stream' + EXE))]),
     'clock': ('test_clock', [str(BUILD / ('test_clock' + EXE))]),
     'cfg': ('test_cfg', [str(BUILD / ('test_cfg' + EXE))]),
     'rs485': ('test_rs485', [str(BUILD / ('test_rs485' + EXE))]),
+    'log': ('test_log', [str(BUILD / ('test_log' + EXE))]),
     'cfg_gen': (None, [sys.executable, str(HERE.parents[1] / 'tools' / 'mkcfg.py'), '--selftest']),
     'gw_sim': (None, [sys.executable, str(HERE.parents[1] / 'tools' / 'gw_sim.py'), '--selftest']),
     'e2e': ('host_node', [sys.executable, str(HERE / 'e2e.py')]),

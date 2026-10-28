@@ -20,6 +20,7 @@ PLC: пины, ШИМ, АЦП, ЦАП, счётчики, шины TWI и UART.
 | `components/objdict` | Object Dictionary: predefined-объекты, регистрация, упаковка значений, NVS |
 | `components/plc` | VM (целые и float), управление программой, мерке́ры, API функции, ввод-вывод, хранение программы |
 | `components/node_cfg` | Раздел `cfg`: разбор и проверка настроек узла со страницы установки |
+| `components/node_log` | Журнал узла для шлюза: перехват журнала ESP-IDF, очередь до подключения |
 | `main` | Задача узла (тик 10 мс), применение `cfg`; значения без `cfg` — в `menuconfig → EspNode` |
 | `tools/gw_sim.py` | Симулятор шлюза X13 для проверки без X13 |
 | `tools/mkcfg.py` | Образ раздела `cfg` из командной строки |
@@ -49,6 +50,13 @@ idf.py -B build/default -p COM3 flash monitor
 ```
 idf.py -B build/default -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.debug" build
 ```
+
+Предупреждения и ошибки прошивки узел отправляет шлюзу (предопределённые объекты `0xFFE0`–`0xFFE3`, как
+задумано в X13), Enviriot пишет их в свой журнал с тем же уровнем: `<имя узла> msgId=… msg=<hex>[<текст>]`.
+Строки ждут, пока узел подключится; в очереди 16 строк, при переполнении остаются первые. Уровень —
+`menuconfig`, «EspNode → Log to the gateway» (по умолчанию Warning); строки MQTT-SN и линий не отправляются.
+Программа PLC пишет туда свои строки потоками ([docs/plc-api.md](docs/plc-api.md#потоки)), они уходят при
+любом уровне.
 
 ESP-IDF v6.1 помечает в `sdkconfig` значения по умолчанию (`# default:`) и заменяет их значениями из
 `sdkconfig.defaults` и `sdkconfig.debug`; выбранное в `menuconfig` остаётся. Консоль и MQTT-SN на одном

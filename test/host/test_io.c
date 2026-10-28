@@ -8,6 +8,7 @@
 #include "od_clock.h"
 #include "plc_api.h"
 #include "plc_io.h"
+#include "plc_stream.h"
 #include "plc_vm.h"
 
 static int failed, passed;
@@ -34,6 +35,7 @@ static void setup(void)
     };
     fake_reset();
     plc_io_init(&cfg);
+    plc_stream_init(NULL);
 }
 
 static uint32_t in(uint32_t pin)
@@ -467,10 +469,14 @@ static void test_uart(void)
     fake_uart_rx_len[2] = 0;
     CHECK(uart_avail(2) == 0);
 
-    CHECK((plc_io_uart_put(2, 0x155, &v) == PLC_RUN) && (v == 1));
-    CHECK((fake_uart_tx_len[2] == 1) && (fake_uart_tx[2][0] == 0x55));
-    fake_uart_tx_room = 0;
-    CHECK((plc_io_uart_put(2, 0x56, &v) == PLC_RUN) && (v == 0));
+    // Output: what the FIFO takes, the stream of the program keeps the rest
+    CHECK(plc_io_uart_ready(2) && !plc_io_uart_ready(1) && !plc_io_uart_ready(0) && !plc_io_uart_ready(3));
+    CHECK(plc_io_uart_write(2, (const uint8_t *)"UV", 2) == 2);
+    CHECK((fake_uart_tx_len[2] == 2) && (fake_uart_tx[2][0] == 'U') && (fake_uart_tx[2][1] == 'V'));
+    fake_uart_tx_room = 1;
+    CHECK(plc_io_uart_write(2, (const uint8_t *)"WX", 2) == 1);
+    CHECK((fake_uart_tx_len[2] == 3) && (fake_uart_tx[2][2] == 'W'));
+    CHECK(plc_io_uart_write(1, (const uint8_t *)"Y", 1) == 0);    // Not open
     CHECK(plc_io_uart_get(1, &v) == PLC_ERR_PARM);
     CHECK(plc_io_uart_get(0, &v) == PLC_ERR_PARM);
     CHECK(plc_io_uart_get(3, &v) == PLC_ERR_PARM);
@@ -687,6 +693,8 @@ static void test_program(void)
     }
     CHECK(plc_vm_cycle() == PLC_OK);
     CHECK((plc_vm_cycle() == PLC_OK) && (ram[0] == 0xFFFFFFFF) && (ram[1] == 0) && (ram[2] == 1));
+    CHECK(fake_uart_tx_len[2] == 0);                    // After the cycle, as X13
+    plc_stream_flush();
     CHECK((fake_uart_tx_len[2] == 1) && (fake_uart_tx[2][0] == 0x41));
 
     // Clock: ram[0] = NowSeconds(), ram[1] = Today(); 1970-01-01 (Thursday) until the gateway sets it

@@ -10,6 +10,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -23,6 +24,8 @@ typedef struct {
     uint64_t reserved_pins;     // GPIOs the program must not use (flash, console, MQTT-SN link), bit n - GPIOn
     uint8_t  reserved_uarts;    // UART ports the program must not use, bit n - UARTn
     bool     adc2;              // ADC2 pins may be analog inputs: no WiFi, its driver takes ADC2
+    // Lines the program writes to the node log (streams 0xFFE0..0xFFE3), level Debug 0 .. Error 3; NULL - dropped
+    void   (*log)(int level, const char *text, size_t len);
 } plc_config_t;
 
 // Load the program and settings, requires nvs_flash_init(). Call before od_init().

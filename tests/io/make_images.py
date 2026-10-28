@@ -10,17 +10,20 @@ from pathlib import Path
 # Opcodes
 DUP, DROP = 0x02, 0x03
 LDI_0, LDI_U1, LDI_U2, LDI_S4, LDI_1 = 0x38, 0x3C, 0x3D, 0x3B, 0x3E
-AND, ADD, DIV = 0x09, 0x10, 0x13
+AND, ADD, DIV, MOD = 0x09, 0x10, 0x13, 0x14
+FDIV, S32TOF = 0x1B, 0x30
 CEQ, CGT = 0x20, 0x22
 LDM, STM = 0x9B, 0xBB                   # LDM_S4_C16 / STM_S4_C16: 32-bit word, 16-bit address
 IN, OUT, API = 0xC0, 0xC1, 0xC6
 JZ, JNZ, JMP, RET = 0xF1, 0xF2, 0xF3, 0xFF
 
 # API functions
-MILLIS, SECONDS = 6, 7
+MILLIS, SECONDS, NOW_SECONDS = 6, 7, 9
 CONFIG_PIN = 31                        # ConfigPin(pin, mode, option)
 TWI_CONTROL, TWI_STATUS = 1, 2        # Bus 0, as X13
 UART_AVAIL, UART_GET, UART_PUT = 21, 22, 23
+SEND_BYTE, SEND_INT, SEND_FLOAT = 23, 24, 25    # Streams: SendByte = UartPutByte
+LOG_INFO = 0xFFE1                       # Stream: node log, Info
 TWI_RDY, TWI_FAILED = 0x10 << 8, 0xE0 << 8     # Status bits: access << 8
 
 # Pin modes
@@ -68,6 +71,11 @@ class Asm:
         for a in reversed(args):
             self.ldi(a)
         return self.op(API, func)
+
+    def text(self, stream, s):          # SendByte for each character, results dropped
+        for c in s.encode():
+            self.call(SEND_BYTE, stream, c).op(DROP)
+        return self
 
     def label(self, name):
         self.labels[name] = len(self.code)
@@ -148,6 +156,25 @@ def uart_loop():
     return image(init, cycle)
 
 
+def stream():
+    """Streams. UART2 9600 8N1, TX GPIO4 (to RX of a USB-UART adapter), RX GPIO5. Once a second a line to
+    UART2: "<NowSeconds> <getSeconds / 3, 2 digits>\\r\\n"; every 10 s a line to the node log, Info:
+    "t=<getSeconds> v=<getSeconds / 3, width 8, 2 digits>". Md0 = NowSeconds sent, Md1 = result of
+    SendFloatAsString to UART2, Md2 = log lines, Md3 = second of the last send."""
+    third = 0x40400000                  # 3.0f
+    init = Asm().call(CONFIG_PIN, 4, UART2_TX, 9600).call(CONFIG_PIN, 5, UART2_RX, 0)
+    cycle = Asm().call(SECONDS).ld(3).op(CEQ).jump(JNZ, 'end') \
+        .call(SECONDS).st(3) \
+        .call(NOW_SECONDS).op(DUP).st(0).ldi(2).op(API, SEND_INT).op(DROP).text(2, ' ') \
+        .ld(3).op(S32TOF).ldi(third).op(FDIV).ldi(3).ldi(2).op(API, SEND_FLOAT).st(1).text(2, '\r\n') \
+        .ld(3).ldi(10).op(MOD).jump(JNZ, 'end') \
+        .text(LOG_INFO, 't=').ld(3).ldi(LOG_INFO).op(API, SEND_INT).op(DROP).text(LOG_INFO, ' v=') \
+        .ld(3).op(S32TOF).ldi(third).op(FDIV).ldi(183).ldi(LOG_INFO).op(API, SEND_FLOAT).op(DROP) \
+        .ld(2).ldi(1).op(ADD).st(2) \
+        .label('end')
+    return image(init, cycle)
+
+
 def err_flash():
     """ConfigPin(6, OUT, 0): flash pin -> stop 0x8A."""
     return image(Asm().call(CONFIG_PIN, 6, OUT_, 0), Asm())
@@ -168,6 +195,7 @@ IMAGES = {
     'adc_dac': adc_dac(),
     'twi_scan': twi_scan(),
     'uart_loop': uart_loop(),
+    'stream': stream(),
     'err_flash': err_flash(),
     'err_pwm9': err_pwm9(),
 }

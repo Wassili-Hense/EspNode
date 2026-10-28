@@ -540,12 +540,17 @@ int plc_hw_uart_get(int port)
     return (uart_read_bytes((uart_port_t)port, &byte, 1, 0) == 1) ? byte : -1;
 }
 
-bool plc_hw_uart_put(int port, uint8_t byte)
+size_t plc_hw_uart_write(int port, const uint8_t *buf, size_t len)
 {
-    if (uart_ll_get_txfifo_len(UART_LL_GET_HW(port)) == 0) {
-        return false;                       // FIFO full, uart_write_bytes() would wait
+    size_t room = uart_ll_get_txfifo_len(UART_LL_GET_HW(port));
+    if (len > room) {
+        len = room;                         // More and uart_write_bytes() would wait
     }
-    return uart_write_bytes((uart_port_t)port, &byte, 1) == 1;
+    if (len == 0) {
+        return 0;
+    }
+    int n = uart_write_bytes((uart_port_t)port, buf, len);
+    return (n > 0) ? (size_t)n : 0;
 }
 
 void plc_hw_uart_close(int port)

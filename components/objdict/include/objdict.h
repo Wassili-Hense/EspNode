@@ -59,6 +59,8 @@ extern "C" {
 #define OD_ID_PHY1_ADDR         0xFFC1  // Array, read only
 #define OD_ID_FREE_PINS         0xFFD8  // Array, read only: GPIOs free for the PLC program (plc provider)
 #define OD_ID_FREE_UARTS        0xFFD9  // UInt8, read only: UART ports free for the PLC program (plc provider)
+#define OD_ID_LOG_DEBUG         0xFFE0  // Array, sent only: a line of the node log (node_log), Debug ..
+#define OD_ID_LOG_ERROR         0xFFE3  // .. Error: 0xFFE0 + level
 
 // Topic id of a dynamic object
 #define OD_TOPIC_NEW            0x0000  // Not registered yet

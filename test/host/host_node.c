@@ -6,7 +6,8 @@
 // as main.c from the next "reboot": 4-byte addresses), "udprx <src ip hex> <message hex>", "gw-phy <0|1|2>"
 // (a gateway link PHY2 from the next "reboot": 1 - serial to an X13 node, 2 - RS-485 bus), "phy2rx <hex
 // frame>", "rs485-phy <0|1>" (PHY1 is an RS-485 bus from the next "reboot"), "busrx <hex RS-485 frame>",
-// "seed <n>" (random numbers: nodes on one bus differ), "quit".
+// "seed <n>" (random numbers: nodes on one bus differ), "log <line of the ESP-IDF log>" (node_log, Warning and up
+// as the default of main.c), "quit".
 // Output: "tx <hex frame>" (serial), "udp <dst ip hex> <message hex>", "phy2 <hex frame>" (to the node
 // behind) or "bus <hex RS-485 frame>" lines, other results, then "ok".
 #include <inttypes.h>
@@ -19,6 +20,7 @@
 #include "fake_hw.h"
 #include "mqttsn_client.h"
 #include "mqttsn_gateway.h"
+#include "node_log.h"
 #include "nvs.h"
 #include "objdict.h"
 #include "od_pack.h"
@@ -187,12 +189,30 @@ static struct { uint32_t generation; unsigned node_id; char device_type[16]; cha
     0, 0xFF, "E1S10.400", "",
 };
 
+// As main.c: a line of the node log when the objects have nothing to send
+static void log_publish(void)
+{
+    node_log_line_t line;
+    if ((mqttsn_client_status() == MQTTSN_STATUS_CONNECT) && mqttsn_client_can_send() && node_log_get(&line)) {
+        mqttsn_client_publish(MQTTSN_FL_QOS0 | MQTTSN_FL_TOPICID_PREDEF, OD_ID_LOG_DEBUG + line.level,
+                              (const uint8_t *)line.text, line.len);
+    }
+}
+
+// node_log_add() of the firmware, without the lock and the console
+static void plc_log(int level, const char *text, size_t len)
+{
+    node_log_put_text(level, text, len);
+}
+
 static void start(void)
 {
+    node_log_reset(NODE_LOG_WARN);
     fake_reset();
     fake_now_ms = sim_ms;
     const plc_config_t plc_cfg = {
         .reserved_pins = 0xFC0ull | (1ull << 1) | (1ull << 3), .reserved_uarts = 1u << 1, .adc2 = !udp.on,
+        .log = plc_log,
     };
     if (plc_init(&plc_cfg) != ESP_OK) { fprintf(stderr, "plc_init failed\n"); exit(1); }
     static const od_provider_t *providers[1];
@@ -277,7 +297,9 @@ int main(void)
             }
         } else if (!strncmp(line, "tick ", 5)) {
             int n = atoi(line + 5);
-            for (int i = 0; i < n; i++) { sim_ms += 10; fake_now_ms = sim_ms; od_poll(); mqttsn_client_tick(); }
+            for (int i = 0; i < n; i++) {
+                sim_ms += 10; fake_now_ms = sim_ms; od_poll(); log_publish(); mqttsn_client_tick();
+            }
         } else if (!strcmp(line, "status")) {
             printf("status %s\n", mqttsn_client_status_str(mqttsn_client_status()));
         } else if (!strcmp(line, "reboot")) {
@@ -328,6 +350,8 @@ int main(void)
                     }
                 }
             }
+        } else if (!strncmp(line, "log ", 4)) {
+            node_log_put(line + 4, strlen(line + 4));
         } else if (!strncmp(line, "seed ", 5)) {
             rng = (uint32_t)strtoul(line + 5, NULL, 0);
         } else if (!strncmp(line, "udprx ", 6)) {

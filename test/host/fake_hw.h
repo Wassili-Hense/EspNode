@@ -26,7 +26,7 @@ extern uint8_t  fake_uart_rx[PLC_HW_UART_PORTS][FAKE_UART_BUF];     // Received,
 extern size_t   fake_uart_rx_len[PLC_HW_UART_PORTS];
 extern uint8_t  fake_uart_tx[PLC_HW_UART_PORTS][FAKE_UART_BUF];     // Sent
 extern size_t   fake_uart_tx_len[PLC_HW_UART_PORTS];
-extern size_t   fake_uart_tx_room;                  // Bytes plc_hw_uart_put() still accepts
+extern size_t   fake_uart_tx_room;                  // Bytes plc_hw_uart_write() still accepts
 
 extern const char *fake_fail;                       // Call name to fail, e.g. "pwm_timer"; NULL - none
 

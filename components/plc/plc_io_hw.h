@@ -74,5 +74,5 @@ void     plc_hw_twi_close(int bus);     // Waits for a running transfer
 bool     plc_hw_uart_open(int port, uint32_t tx, uint32_t rx, int de, uint32_t baud, uint32_t format);
 size_t   plc_hw_uart_avail(int port);
 int      plc_hw_uart_get(int port);
-bool     plc_hw_uart_put(int port, uint8_t byte);
+size_t   plc_hw_uart_write(int port, const uint8_t *buf, size_t len);   // Into the FIFO as far as it fits, no wait
 void     plc_hw_uart_close(int port);

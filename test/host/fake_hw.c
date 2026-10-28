@@ -272,14 +272,14 @@ int plc_hw_uart_get(int port)
     return byte;
 }
 
-bool plc_hw_uart_put(int port, uint8_t byte)
+size_t plc_hw_uart_write(int port, const uint8_t *buf, size_t len)
 {
-    if ((fake_uart_tx_room == 0) || (fake_uart_tx_len[port] >= FAKE_UART_BUF)) {
-        return false;
+    size_t n = 0;
+    while ((n < len) && (fake_uart_tx_room > 0) && (fake_uart_tx_len[port] < FAKE_UART_BUF)) {
+        fake_uart_tx_room--;
+        fake_uart_tx[port][fake_uart_tx_len[port]++] = buf[n++];
     }
-    fake_uart_tx_room--;
-    fake_uart_tx[port][fake_uart_tx_len[port]++] = byte;
-    return true;
+    return n;
 }
 
 void plc_hw_uart_close(int port)

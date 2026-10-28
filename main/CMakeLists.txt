@@ -1,5 +1,5 @@
 idf_component_register(SRCS "main.c"
-                       PRIV_REQUIRES mqttsn node_cfg objdict plc serial_phy wifi_phy nvs_flash esp_timer)
+                       PRIV_REQUIRES mqttsn node_cfg node_log objdict plc serial_phy wifi_phy nvs_flash esp_timer)
 
 # Software version in the device type: git tag vX.Y.Z -> "XYZ" (X13: "320" = 3.2.0). PROJECT_VER is
 # "git describe" of ESP-IDF; without such a tag CONFIG_ESPNODE_SW_VERSION stays

@@ -8,6 +8,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "plc_vm.h"
@@ -84,8 +85,11 @@ plc_status_t plc_io_twi_status(uint32_t bus, uint32_t *status);
 plc_status_t plc_io_twi_put(uint32_t bus, uint32_t byte);
 plc_status_t plc_io_twi_get(uint32_t bus, uint32_t *byte);
 
-// UART as in X13 (API 21-23), the port is the UART number. Bytes to read are reported after a pause:
+// UART as in X13 (API 21-22), the port is the UART number. Bytes to read are reported after a pause:
 // when nothing new arrived since the previous call (end of a frame) or the buffer is half full.
 plc_status_t plc_io_uart_avail(uint32_t port, uint32_t *count);
 plc_status_t plc_io_uart_get(uint32_t port, uint32_t *value);      // 0xFFFFFFFF (-1) - empty
-plc_status_t plc_io_uart_put(uint32_t port, uint32_t byte, uint32_t *ok);
+// Output of the program goes through its stream (plc_stream.h): the port is open, bytes into the FIFO without
+// waiting, returns how many it took
+bool         plc_io_uart_ready(uint32_t port);
+size_t       plc_io_uart_write(uint32_t port, const uint8_t *buf, size_t len);

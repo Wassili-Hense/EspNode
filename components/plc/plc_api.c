@@ -10,6 +10,7 @@
 #include "objdict.h"
 #include "plc_api.h"
 #include "plc_io.h"
+#include "plc_stream.h"
 
 #define pop     plc_vm_pop
 #define push    plc_vm_push
@@ -109,11 +110,21 @@ plc_status_t plc_api_call(uint8_t func)
             return PLC_ERR_OFR_SP;
         }
         return result(plc_io_uart_get(a[0], &val), &val);
-    case PLC_API_UART_PUT:
+    case PLC_API_SEND_BYTE:
         if (!args(a, 2)) {
             return PLC_ERR_OFR_SP;
         }
-        return result(plc_io_uart_put(a[0], a[1], &val), &val);
+        return result(plc_stream_byte(a[0], a[1], &val), &val);
+    case PLC_API_PRINT_INT:
+        if (!args(a, 2)) {
+            return PLC_ERR_OFR_SP;
+        }
+        return result(plc_stream_int(a[0], a[1], &val), &val);
+    case PLC_API_PRINT_FLOAT:
+        if (!args(a, 3)) {
+            return PLC_ERR_OFR_SP;
+        }
+        return result(plc_stream_float(a[0], a[1], a[2], &val), &val);
 
     case PLC_API_CONFIG_PIN:
         if (!args(a, 3)) {

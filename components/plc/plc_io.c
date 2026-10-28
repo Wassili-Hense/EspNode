@@ -788,11 +788,12 @@ plc_status_t plc_io_uart_get(uint32_t port, uint32_t *value)
     return PLC_RUN;
 }
 
-plc_status_t plc_io_uart_put(uint32_t port, uint32_t byte, uint32_t *ok)
+bool plc_io_uart_ready(uint32_t port)
 {
-    if (!uart_ready(port)) {
-        return PLC_ERR_PARM;
-    }
-    *ok = plc_hw_uart_put((int)port, (uint8_t)byte) ? 1 : 0;
-    return PLC_RUN;
+    return uart_ready(port);
+}
+
+size_t plc_io_uart_write(uint32_t port, const uint8_t *buf, size_t len)
+{
+    return uart_ready(port) ? plc_hw_uart_write((int)port, buf, len) : 0;
 }

@@ -21,6 +21,7 @@
 #include "mqttsn_client.h"
 #include "mqttsn_gateway.h"
 #include "node_cfg.h"
+#include "node_log.h"
 #include "objdict.h"
 #include "plc.h"
 #include "serial_phy.h"
@@ -230,6 +231,16 @@ static size_t wifi_phy1_addr(uint8_t *buf, size_t max)
     return n;
 }
 
+// A line of the node log to the gateway when the objects have nothing to send; QoS0, Enviriot does not answer
+static void log_publish(void)
+{
+    node_log_line_t line;
+    if ((mqttsn_client_status() == MQTTSN_STATUS_CONNECT) && mqttsn_client_can_send() && node_log_take(&line)) {
+        mqttsn_client_publish(MQTTSN_FL_QOS0 | MQTTSN_FL_TOPICID_PREDEF, OD_ID_LOG_DEBUG + line.level,
+                              (const uint8_t *)line.text, line.len);
+    }
+}
+
 // Owns the MQTT-SN client and the Object Dictionary
 static void node_task(void *arg)
 {
@@ -290,6 +301,7 @@ static void node_task(void *arg)
         if (now >= next_poll) {
             od_poll();
             if (started) {
+                log_publish();
                 mqttsn_client_tick();
             }
 
@@ -303,6 +315,8 @@ static void node_task(void *arg)
 
 void app_main(void)
 {
+    node_log_init(CONFIG_ESPNODE_LOG_GATEWAY_LEVEL);    // First: the warnings of the start go to the gateway too
+
     esp_err_t err = nvs_flash_init();
     if ((err == ESP_ERR_NVS_NO_FREE_PAGES) || (err == ESP_ERR_NVS_NEW_VERSION_FOUND)) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -318,6 +332,7 @@ void app_main(void)
         .reserved_pins  = FLASH_PINS | console_pins(),
         .reserved_uarts = console_uarts(),
         .adc2           = !wifi,        // WiFi only as the first interface
+        .log            = node_log_add,
     };
     for (size_t i = 0; i < s_cfg.n_ifs; i++) {
         const node_cfg_if_t *itf = &s_cfg.ifs[i];

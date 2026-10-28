@@ -16,6 +16,7 @@
 #include "plc_api.h"
 #include "plc_io.h"
 #include "plc_store.h"
+#include "plc_stream.h"
 #include "plc_vm.h"
 
 static const char *TAG = "plc";
@@ -116,6 +117,7 @@ static uint8_t start(void)
     // Pins set up again the same way keep running, outputs don't glitch
     plc_io_restart_begin();
     s.io_sweep = true;
+    plc_stream_reset();
 
     plc_vm_restart();
     s.run = true;
@@ -186,6 +188,7 @@ static void control(void)
             ESP_LOGI(TAG, "stopped");
         }
         s.run = false;
+        plc_stream_reset();
         reply(CMD_STOP_RESP, PLC_OK);
         break;
 
@@ -399,6 +402,7 @@ static void provider_proc(void)
 {
     if (s.run) {
         plc_status_t stat = plc_vm_cycle();
+        plc_stream_flush();             // Before the stop report: what the program wrote helps to find the error
         if ((stat == PLC_OK) && s.io_sweep) {
             plc_io_restart_end();
             s.io_sweep = false;
@@ -411,6 +415,8 @@ static void provider_proc(void)
                      " PC=0x%04" PRIX32, (unsigned)stat, s.regs.sp, s.regs.top, s.regs.sfp,
                      s.regs.pc);
         }
+    } else {
+        plc_stream_flush();             // UART bytes still waiting after a stop on an error
     }
 
     // Report the error as soon as the exchange buffer is free
@@ -495,6 +501,7 @@ esp_err_t plc_init(const plc_config_t *cfg)
         .adc2           = cfg->adc2,
     };
     plc_io_init(&io_cfg);
+    plc_stream_init(cfg->log);
 
     uint32_t stack_bottom = 0;
     if (plc_store_load(s.prg, PRG_SIZE, &stack_bottom) != ESP_OK) {

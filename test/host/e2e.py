@@ -162,6 +162,21 @@ ok, mark = reboot()
 check(ok and h.gw.client_id == 'porch' and 'DHCPREQ' not in h.types(mark),
       f'no cfg: saved values kept, client id {h.gw.client_id!r}')
 
+# Node log: lines of the start wait for the session, then PUBLISH QoS0 to 0xFFE0 + level; Info, MQTT-SN out
+h.cmd('reboot')
+for ln in ('W (12) espnode: cfg: not written, using defaults', 'I (13) espnode: cfg: generation 1',
+           'W (14) mqttsn: tx PUBLISH failed', 'E (15) plc: program storage not available'):
+    h.cmd('log ' + ln)
+mark = h.ms
+ok = h.run(120_000, until=lambda: h.status() == 'CONNECT')
+h.run(1000)
+logs = [(g.u16(m, 3), m[2], m[7:]) for m in h.node_msgs(mark) if m[1] == g.PUBLISH and 0xFFE0 <= g.u16(m, 3) <= 0xFFE3]
+check(ok and logs == [(0xFFE2, 0x01, b'espnode: cfg: not written, using defaults'),
+                      (0xFFE3, 0x01, b'plc: program storage not available')], f'node log after the session: {logs}')
+msgs = h.node_msgs(mark)
+first_log = min(i for i, m in enumerate(msgs) if m[1] == g.PUBLISH and g.u16(m, 3) >= 0xFFE0)
+check(first_log > [m[1] for m in msgs].index(g.SUBSCRIBE), 'the log only in the session, after SUBSCRIBE')
+
 h.cmd('quit')
 print(f'{"FAILED" if hn.failed else "ALL PASSED"} in {time.time() - t0:.1f} s real time')
 sys.exit(1 if hn.failed else 0)
