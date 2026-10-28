@@ -150,8 +150,23 @@ static void test_analog(void)
     CHECK(plc_io_out(32, 1) == PLC_ERR_PARM);
     CHECK(CFG(33, ANALOG, 4) == PLC_ERR_PARM);
     CHECK(CFG(33, ANALOG, -1) == PLC_ERR_PARM);
-    CHECK(CFG(4, ANALOG, 0) == PLC_ERR_PARM);       // Not ADC1
+    CHECK(CFG(4, ANALOG, 0) == PLC_ERR_PARM);       // ADC2, taken by WiFi
     CHECK(CFG(39, ANALOG, 0) == PLC_RUN);
+
+    // Without WiFi ADC2 too; a pin with no ADC still not
+    const plc_io_config_t no_wifi = { .reserved_pins = 0xFC0ull, .adc2 = true };
+    fake_reset();
+    plc_io_init(&no_wifi);
+    fake_mv[4] = 567;
+    CHECK(CFG(4, ANALOG, 2) == PLC_RUN);
+    CHECK(CALLED("adc_open 4 2"));
+    CHECK(in(4) == 567);
+    CHECK(CFG(27, ANALOG, 0) == PLC_RUN);
+    CHECK(CFG(32, ANALOG, 0) == PLC_RUN);
+    CHECK(CFG(5, ANALOG, 0) == PLC_ERR_PARM);
+    CHECK(CFG(4, OFF, 0) == PLC_RUN);
+    CHECK(CFG(4, OUT, 0) == PLC_RUN);               // Released, other modes as before
+    setup();
 
     CHECK(CFG(25, DAC, 0) == PLC_RUN);
     CHECK(CALLED("dac_open 25"));

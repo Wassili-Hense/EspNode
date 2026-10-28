@@ -53,8 +53,8 @@ typedef struct {
 } twi_t;
 
 static struct {
-    adc_oneshot_unit_handle_t   adc;
-    adc_cali_handle_t           cali[4];            // Per attenuation
+    adc_oneshot_unit_handle_t   adc[2];             // ADC1, ADC2
+    adc_cali_handle_t           cali[2][4];         // Per unit and attenuation
     dac_oneshot_handle_t        dac[2];
     uint8_t                     pwm_bits[PLC_HW_PWM_TIMERS];
     pcnt_unit_handle_t          cnt[PLC_HW_COUNTERS];
@@ -62,10 +62,10 @@ static struct {
     twi_t                       twi[PLC_HW_TWI_BUSES];
 } s;
 
-static bool adc_channel(uint32_t pin, adc_channel_t *ch)
+static bool adc_channel(uint32_t pin, adc_unit_t *unit, adc_channel_t *ch)
 {
-    adc_unit_t unit;
-    return (adc_oneshot_io_to_channel((int)pin, &unit, ch) == ESP_OK) && (unit == ADC_UNIT_1);
+    return (adc_oneshot_io_to_channel((int)pin, unit, ch) == ESP_OK) &&
+           ((*unit == ADC_UNIT_1) || (*unit == ADC_UNIT_2));
 }
 
 static int dac_index(uint32_t pin)
@@ -83,9 +83,10 @@ uint32_t plc_hw_caps(uint32_t pin)
     if (GPIO_IS_VALID_OUTPUT_GPIO((int)pin)) {
         caps |= PLC_HW_CAP_OUTPUT;
     }
+    adc_unit_t unit;
     adc_channel_t ch;
-    if (adc_channel(pin, &ch)) {
-        caps |= PLC_HW_CAP_ADC;             // ADC1 only, ADC2 is taken by WiFi
+    if (adc_channel(pin, &unit, &ch)) {
+        caps |= (unit == ADC_UNIT_1) ? PLC_HW_CAP_ADC : PLC_HW_CAP_ADC2;
     }
     if (dac_index(pin) >= 0) {
         caps |= PLC_HW_CAP_DAC;
@@ -150,43 +151,48 @@ void plc_hw_gpio_set(uint32_t pin, bool level)
 
 bool plc_hw_adc_open(uint32_t pin, int atten)
 {
+    adc_unit_t unit;
     adc_channel_t ch;
-    if (!adc_channel(pin, &ch) || (atten < 0) || (atten > 3)) {
+    if (!adc_channel(pin, &unit, &ch) || (atten < 0) || (atten > 3)) {
         return false;
     }
-    if (s.adc == NULL) {
-        const adc_oneshot_unit_init_cfg_t cfg = { .unit_id = ADC_UNIT_1 };
-        if (adc_oneshot_new_unit(&cfg, &s.adc) != ESP_OK) {
+    if (s.adc[unit] == NULL) {
+        if ((s.adc[ADC_UNIT_1] == NULL) && (s.adc[ADC_UNIT_2] == NULL)) {
+            // Without calibration in eFuse the reference may be 1000..1200 mV instead of 1100
+            static const char *const source[] = { "eFuse Vref", "eFuse two point", "default Vref, no eFuse" };
+            adc_cali_line_fitting_efuse_val_t val;
+            if ((adc_cali_scheme_line_fitting_check_efuse(&val) == ESP_OK) && ((unsigned)val < 3)) {
+                ESP_LOGI(TAG, "ADC calibration: %s", source[val]);
+            }
+        }
+        const adc_oneshot_unit_init_cfg_t cfg = { .unit_id = unit };
+        if (adc_oneshot_new_unit(&cfg, &s.adc[unit]) != ESP_OK) {
             return false;
         }
-        // Without calibration in eFuse the reference may be 1000..1200 mV instead of 1100
-        static const char *const source[] = { "eFuse Vref", "eFuse two point", "default Vref, no eFuse" };
-        adc_cali_line_fitting_efuse_val_t val;
-        if ((adc_cali_scheme_line_fitting_check_efuse(&val) == ESP_OK) && ((unsigned)val < 3)) {
-            ESP_LOGI(TAG, "ADC calibration: %s", source[val]);
-        }
     }
-    if (s.cali[atten] == NULL) {
+    if (s.cali[unit][atten] == NULL) {
         const adc_cali_line_fitting_config_t cfg = {
-            .unit_id        = ADC_UNIT_1,
+            .unit_id        = unit,
             .atten          = (adc_atten_t)atten,
             .bitwidth       = ADC_BITWIDTH_DEFAULT,
             .default_vref   = ADC_DEFAULT_VREF,
         };
-        if (adc_cali_create_scheme_line_fitting(&cfg, &s.cali[atten]) != ESP_OK) {
+        if (adc_cali_create_scheme_line_fitting(&cfg, &s.cali[unit][atten]) != ESP_OK) {
             return false;
         }
     }
     const adc_oneshot_chan_cfg_t cfg = { .atten = (adc_atten_t)atten, .bitwidth = ADC_BITWIDTH_DEFAULT };
-    return adc_oneshot_config_channel(s.adc, ch, &cfg) == ESP_OK;
+    return adc_oneshot_config_channel(s.adc[unit], ch, &cfg) == ESP_OK;
 }
 
+// ADC2 fails (ESP_ERR_TIMEOUT) while the WiFi driver holds it; plc_io does not allow it then
 bool plc_hw_adc_read(uint32_t pin, int atten, int32_t *mv)
 {
+    adc_unit_t unit;
     adc_channel_t ch;
     int val = 0;
-    if (!adc_channel(pin, &ch) ||
-        (adc_oneshot_get_calibrated_result(s.adc, s.cali[atten], ch, &val) != ESP_OK)) {
+    if (!adc_channel(pin, &unit, &ch) ||
+        (adc_oneshot_get_calibrated_result(s.adc[unit], s.cali[unit][atten], ch, &val) != ESP_OK)) {
         return false;
     }
     *mv = val;

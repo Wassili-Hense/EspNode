@@ -456,6 +456,7 @@ esp_err_t plc_init(const plc_config_t *cfg)
     const plc_io_config_t io_cfg = {
         .reserved_pins  = cfg->reserved_pins,
         .reserved_uarts = cfg->reserved_uarts,
+        .adc2           = cfg->adc2,
     };
     plc_io_init(&io_cfg);
 

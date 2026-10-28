@@ -58,6 +58,7 @@ typedef struct {
 static struct {
     uint64_t    reserved_pins;
     uint8_t     reserved_uarts;
+    bool        adc2;
     pin_t       pin[PLC_HW_PINS];
     struct {
         int8_t  pin;
@@ -367,12 +368,13 @@ static plc_status_t setup(uint32_t pin, uint32_t mode, int32_t option)
         return PLC_RUN;
     }
 
-    case GRP_ADC:
-        if (!(caps & PLC_HW_CAP_ADC) || (option < 0) || (option > 3) ||
-            !plc_hw_adc_open(pin, (int)option)) {
+    case GRP_ADC: {
+        bool adc = (caps & PLC_HW_CAP_ADC) || (s.adc2 && (caps & PLC_HW_CAP_ADC2));
+        if (!adc || (option < 0) || (option > 3) || !plc_hw_adc_open(pin, (int)option)) {
             return PLC_ERR_PARM;
         }
         return PLC_RUN;
+    }
 
     case GRP_DAC:
         if (!(caps & PLC_HW_CAP_DAC) || !plc_hw_dac_open(pin)) {
@@ -425,6 +427,7 @@ void plc_io_init(const plc_io_config_t *cfg)
     memset(&s, 0, sizeof(s));
     s.reserved_pins = cfg->reserved_pins;
     s.reserved_uarts = cfg->reserved_uarts;
+    s.adc2 = cfg->adc2;
     for (int i = 0; i < PLC_HW_PWM_CHANNELS; i++) {
         s.pwm[i].pin = FREE;
         s.pwm[i].timer = FREE;

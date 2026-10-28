@@ -7,6 +7,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "plc_vm.h"
@@ -21,7 +22,7 @@ enum {
     PLC_PIN_OUT_INV     = 6,    // ... inverted
     PLC_PIN_OUT_OD      = 7,    // ... open drain
     PLC_PIN_OUT_OD_INV  = 8,    // ... open drain, inverted
-    PLC_PIN_ANALOG      = 9,    // ADC1, millivolts; option - attenuation 0..3 (0 / 2.5 / 6 / 12 dB)
+    PLC_PIN_ANALOG      = 9,    // ADC1, ADC2 without WiFi; mV; option - attenuation 0..3 (0 / 2.5 / 6 / 12 dB)
     PLC_PIN_DAC         = 10,   // DAC, 0..255
     PLC_PIN_PWM         = 11,   // PWM, duty 0..65535; option - frequency, Hz (0 - 1000)
     PLC_PIN_PWM_INV     = 12,   // ... inverted
@@ -44,6 +45,7 @@ enum {
 typedef struct {
     uint64_t reserved_pins;     // Pins the program must not use, bit n - GPIOn
     uint8_t  reserved_uarts;    // UART ports the program must not use, bit n - UARTn
+    bool     adc2;              // ADC2 pins may be analog inputs: no WiFi, its driver takes ADC2
 } plc_io_config_t;
 
 void         plc_io_init(const plc_io_config_t *cfg);

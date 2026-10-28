@@ -58,6 +58,15 @@
           },
           "pins": [32, 33, 34, 35, 36, 37, 38, 39]
         },
+        "ADC2": {
+          "modes": {
+            "ANALOG": { "v": 9, "io": "in", "hint": "Analog input, mV",
+                        "opt": { "hint": "attenuation", "default": 3,
+                                 "values": { "0 dB, 100-950 mV": 0, "2.5 dB, 100-1250 mV": 1,
+                                             "6 dB, 150-1750 mV": 2, "12 dB, 150-2450 mV": 3 } } }
+          },
+          "pins": [0, 2, 4, 12, 13, 14, 15, 25, 26, 27]
+        },
         "DAC": {
           "modes": {
             "DAC": { "v": 10, "io": "out", "hint": "Analog output 0..255" }
@@ -99,7 +108,7 @@
         }
       }
     }
-  }' m='{"attr":4}' ver='1.0.2610.22002' />
+  }' m='{"attr":4}' ver='1.0.2610.28001' />
   <i n='E1W10' s='{
     "editor": "MsStatus",
     "hint": "EspNode, ESP32, phy1: WiFi, MQTT-SN over UDP 1883",
@@ -199,7 +208,7 @@
         }
       }
     }
-  }' m='{"attr":4}' ver='1.0.2610.22002' />
+  }' m='{"attr":4}' ver='1.0.2610.28001' />
   <i n='E1WS10' s='{
     "editor": "MsStatus",
     "hint": "EspNode, ESP32, phy1: WiFi, MQTT-SN over UDP 1883; phy2: UART to an X13 node (gateway)",
@@ -299,7 +308,7 @@
         }
       }
     }
-  }' m='{"attr":4}' ver='1.0.2610.22002' />
+  }' m='{"attr":4}' ver='1.0.2610.28001' />
   <i n='E1SS10' s='{
     "editor": "MsStatus",
     "hint": "EspNode, ESP32, phy1: UART; phy2: UART to an X13 node (gateway)",
@@ -358,6 +367,15 @@
           },
           "pins": [32, 33, 34, 35, 36, 37, 38, 39]
         },
+        "ADC2": {
+          "modes": {
+            "ANALOG": { "v": 9, "io": "in", "hint": "Analog input, mV",
+                        "opt": { "hint": "attenuation", "default": 3,
+                                 "values": { "0 dB, 100-950 mV": 0, "2.5 dB, 100-1250 mV": 1,
+                                             "6 dB, 150-1750 mV": 2, "12 dB, 150-2450 mV": 3 } } }
+          },
+          "pins": [0, 2, 4, 12, 13, 14, 15, 25, 26, 27]
+        },
         "DAC": {
           "modes": {
             "DAC": { "v": 10, "io": "out", "hint": "Analog output 0..255" }
@@ -399,7 +417,7 @@
         }
       }
     }
-  }' m='{"attr":4}' ver='1.0.2610.22002' />
+  }' m='{"attr":4}' ver='1.0.2610.28001' />
   <i n='E1M10' s='{
     "editor": "MsStatus",
     "hint": "EspNode, ESP32, phy1: RS-485 (X13 bus, 200000 baud)",
@@ -458,6 +476,15 @@
           },
           "pins": [32, 33, 34, 35, 36, 37, 38, 39]
         },
+        "ADC2": {
+          "modes": {
+            "ANALOG": { "v": 9, "io": "in", "hint": "Analog input, mV",
+                        "opt": { "hint": "attenuation", "default": 3,
+                                 "values": { "0 dB, 100-950 mV": 0, "2.5 dB, 100-1250 mV": 1,
+                                             "6 dB, 150-1750 mV": 2, "12 dB, 150-2450 mV": 3 } } }
+          },
+          "pins": [0, 2, 4, 12, 13, 14, 15, 25, 26, 27]
+        },
         "DAC": {
           "modes": {
             "DAC": { "v": 10, "io": "out", "hint": "Analog output 0..255" }
@@ -499,7 +526,7 @@
         }
       }
     }
-  }' m='{"attr":4}' ver='1.0.2610.22002' />
+  }' m='{"attr":4}' ver='1.0.2610.28001' />
   <i n='E1SM10' s='{
     "editor": "MsStatus",
     "hint": "EspNode, ESP32, phy1: UART; phy2: RS-485 bus to X13 nodes (gateway)",
@@ -558,6 +585,15 @@
           },
           "pins": [32, 33, 34, 35, 36, 37, 38, 39]
         },
+        "ADC2": {
+          "modes": {
+            "ANALOG": { "v": 9, "io": "in", "hint": "Analog input, mV",
+                        "opt": { "hint": "attenuation", "default": 3,
+                                 "values": { "0 dB, 100-950 mV": 0, "2.5 dB, 100-1250 mV": 1,
+                                             "6 dB, 150-1750 mV": 2, "12 dB, 150-2450 mV": 3 } } }
+          },
+          "pins": [0, 2, 4, 12, 13, 14, 15, 25, 26, 27]
+        },
         "DAC": {
           "modes": {
             "DAC": { "v": 10, "io": "out", "hint": "Analog output 0..255" }
@@ -599,7 +635,7 @@
         }
       }
     }
-  }' m='{"attr":4}' ver='1.0.2610.22002' />
+  }' m='{"attr":4}' ver='1.0.2610.28001' />
   <i n='E1WM10' s='{
     "editor": "MsStatus",
     "hint": "EspNode, ESP32, phy1: WiFi, MQTT-SN over UDP 1883; phy2: RS-485 bus to X13 nodes (gateway)",
@@ -699,5 +735,5 @@
         }
       }
     }
-  }' m='{"attr":4}' ver='1.0.2610.22002' />
+  }' m='{"attr":4}' ver='1.0.2610.28001' />
 </xst>

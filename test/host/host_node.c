@@ -192,7 +192,7 @@ static void start(void)
     fake_reset();
     fake_now_ms = sim_ms;
     const plc_config_t plc_cfg = {
-        .reserved_pins = 0xFC0ull | (1ull << 1) | (1ull << 3), .reserved_uarts = 1u << 1,
+        .reserved_pins = 0xFC0ull | (1ull << 1) | (1ull << 3), .reserved_uarts = 1u << 1, .adc2 = !udp.on,
     };
     if (plc_init(&plc_cfg) != ESP_OK) { fprintf(stderr, "plc_init failed\n"); exit(1); }
     static const od_provider_t *providers[1];

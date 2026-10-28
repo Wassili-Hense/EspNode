@@ -22,6 +22,7 @@
 #define PLC_HW_CAP_OUTPUT   0x02        // Also internal pull-up / pull-down available
 #define PLC_HW_CAP_ADC      0x04        // ADC1
 #define PLC_HW_CAP_DAC      0x08
+#define PLC_HW_CAP_ADC2     0x10        // ADC2: the WiFi driver takes it, plc_io decides
 
 // TWI transfer result
 #define PLC_HW_TWI_BUSY     (-1)        // Still running
@@ -42,7 +43,7 @@ bool     plc_hw_gpio_output(uint32_t pin, bool open_drain, bool level);
 bool     plc_hw_gpio_get(uint32_t pin);
 void     plc_hw_gpio_set(uint32_t pin, bool level);
 
-// ADC1, atten 0..3; reads millivolts
+// ADC1 or ADC2 by the pin, atten 0..3; reads millivolts
 bool     plc_hw_adc_open(uint32_t pin, int atten);
 bool     plc_hw_adc_read(uint32_t pin, int atten, int32_t *mv);
 

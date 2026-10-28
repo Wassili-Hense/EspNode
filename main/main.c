@@ -317,6 +317,7 @@ void app_main(void)
     plc_config_t plc_cfg = {
         .reserved_pins  = FLASH_PINS | console_pins(),
         .reserved_uarts = console_uarts(),
+        .adc2           = !wifi,        // WiFi only as the first interface
     };
     for (size_t i = 0; i < s_cfg.n_ifs; i++) {
         const node_cfg_if_t *itf = &s_cfg.ifs[i];

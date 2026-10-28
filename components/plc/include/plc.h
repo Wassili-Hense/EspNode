@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -21,6 +22,7 @@ extern "C" {
 typedef struct {
     uint64_t reserved_pins;     // GPIOs the program must not use (flash, console, MQTT-SN link), bit n - GPIOn
     uint8_t  reserved_uarts;    // UART ports the program must not use, bit n - UARTn
+    bool     adc2;              // ADC2 pins may be analog inputs: no WiFi, its driver takes ADC2
 } plc_config_t;
 
 // Load the program and settings, requires nvs_flash_init(). Call before od_init().

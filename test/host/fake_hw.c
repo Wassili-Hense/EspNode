@@ -80,7 +80,8 @@ static bool call(const char *name, const char *fmt, ...)
     return (fake_fail == NULL) || (strcmp(fake_fail, name) != 0);
 }
 
-// ESP32: GPIO0-39 without 20, 24, 28-31; 34-39 input only; ADC1 on 32-39; DAC on 25, 26
+// ESP32: GPIO0-39 without 20, 24, 28-31; 34-39 input only; ADC1 on 32-39; ADC2 on 0, 2, 4, 12-15, 25-27;
+// DAC on 25, 26
 uint32_t plc_hw_caps(uint32_t pin)
 {
     if ((pin >= PLC_HW_PINS) || (pin == 20) || (pin == 24) || ((pin >= 28) && (pin <= 31))) {
@@ -92,6 +93,9 @@ uint32_t plc_hw_caps(uint32_t pin)
     }
     if (pin >= 32) {
         caps |= PLC_HW_CAP_ADC;
+    }
+    if ((pin == 0) || (pin == 2) || (pin == 4) || ((pin >= 12) && (pin <= 15)) || ((pin >= 25) && (pin <= 27))) {
+        caps |= PLC_HW_CAP_ADC2;
     }
     if ((pin == 25) || (pin == 26)) {
         caps |= PLC_HW_CAP_DAC;
