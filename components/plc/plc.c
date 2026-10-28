@@ -439,6 +439,40 @@ static void provider_session(void)
     }
 }
 
+// Device info for the compiler of Enviriot: what the program may use on this node (docs/plc-api.md).
+// GPIO0..39: bit n of byte n / 8 - GPIOn.
+#define FREE_PINS_LEN       5
+
+static uint8_t read_free_pins(const od_subidx_t *sidx, uint8_t *len, uint8_t *buf)
+{
+    (void)sidx;
+    if (*len < FREE_PINS_LEN) {
+        return MQTTSN_RC_REJ_NOT_SUPP;
+    }
+    uint64_t pins = plc_io_free_pins();
+    for (size_t i = 0; i < FREE_PINS_LEN; i++) {
+        buf[i] = (uint8_t)(pins >> (8 * i));
+    }
+    *len = FREE_PINS_LEN;
+    return MQTTSN_RC_ACCEPTED;
+}
+
+static uint8_t read_free_uarts(const od_subidx_t *sidx, uint8_t *len, uint8_t *buf)
+{
+    (void)sidx;
+    if (*len < 1) {
+        return MQTTSN_RC_REJ_NOT_SUPP;
+    }
+    buf[0] = plc_io_free_uarts();
+    *len = 1;
+    return MQTTSN_RC_ACCEPTED;
+}
+
+static const od_entry_t s_info[] = {
+    { { OD_PLACE_PROGMEM, OD_TYPE_ARRAY, 0 }, OD_ID_FREE_PINS,  read_free_pins,  NULL, NULL },
+    { { OD_PLACE_PROGMEM, OD_TYPE_UINT8, 0 }, OD_ID_FREE_UARTS, read_free_uarts, NULL, NULL },
+};
+
 static const od_provider_t s_provider = {
     .place      = OD_PLACE_MERKER,
     .check      = merker_check,
@@ -447,6 +481,8 @@ static const od_provider_t s_provider = {
     .init       = provider_init,
     .proc       = provider_proc,
     .on_session = provider_session,
+    .info       = s_info,
+    .n_info     = sizeof(s_info) / sizeof(s_info[0]),
 };
 
 esp_err_t plc_init(const plc_config_t *cfg)

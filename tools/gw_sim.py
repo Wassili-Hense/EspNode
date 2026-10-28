@@ -75,7 +75,8 @@ def plc_crc16(data: bytes, crc: int = 0xFFFF) -> int:
 
 # Predefined objects of the node, decoded as strings
 PREDEF_STRINGS = {0xFF00: 'NodeName', 0xFFC0: 'DeviceType'}
-PREDEF_NAMES = {0xFF07: 'RTC', 0xFF10: 'NodeId', 0xFF14: 'GateId', 0xFFC1: 'PHY1addr', **PREDEF_STRINGS}
+PREDEF_NAMES = {0xFF07: 'RTC', 0xFF10: 'NodeId', 0xFF14: 'GateId', 0xFFC1: 'PHY1addr', 0xFFD8: 'FreePins',
+                0xFFD9: 'FreeUarts', **PREDEF_STRINGS}
 
 # Node clock, X13 RTC object: sec, min, hour, day, weekday << 5 | month, year % 100, BCD
 RTC_TOPIC = 0xFF07

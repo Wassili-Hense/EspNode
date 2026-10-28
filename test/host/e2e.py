@@ -29,8 +29,8 @@ ok = h.run(120_000, until=lambda: h.status() == 'CONNECT')
 check(ok, f'connected after {h.ms / 1000:.1f} s simulated')
 seq = h.types()
 print('   node:', ' '.join(seq))
-check(seq[:9] == ['DHCPREQ', 'SEARCHGW', 'CONNECT', 'REGISTER', 'PUBLISH', 'PUBLISH', 'PUBLISH', 'SUBSCRIBE',
-                  'PUBACK'], 'message sequence')
+check(seq[:11] == ['DHCPREQ', 'SEARCHGW', 'CONNECT', 'REGISTER'] + ['PUBLISH'] * 5 + ['SUBSCRIBE', 'PUBACK'],
+      'message sequence')
 check(h.gw.client_id == 'E1S10_10', f'client id {h.gw.client_id!r}')
 pubs = [m for m in h.node_msgs() if m[1] == g.PUBLISH]
 check(pubs[0][2] == 0x31 and g.u16(pubs[0], 3) == 0xFF07 and len(pubs[0]) == 13 and
@@ -39,6 +39,11 @@ check(pubs[0][2] == 0x31 and g.u16(pubs[0], 3) == 0xFF07 and len(pubs[0]) == 13 
 check(pubs[1][2] == 0x31 and g.u16(pubs[1], 3) == 0xFFC0 and pubs[1][7:] == b'E1S10.400',
       'device type published QoS1|RETAIN|PREDEF')
 check(g.u16(pubs[2], 3) == 0xFFC1 and pubs[2][7:] == b'\x10', 'PHY1 address published')
+# host_node reserves GPIO1, 3, flash 6-11 and UART1; there are no GPIO20, 24, 28-31
+check(pubs[3][2] == 0x31 and g.u16(pubs[3], 3) == 0xFFD8 and pubs[3][7:] == bytes([0x35, 0xF0, 0xEF, 0x0E, 0xFF]),
+      f'free pins published after a gap in the ids: {pubs[3][7:].hex(" ")}')
+check(pubs[4][2] == 0x31 and g.u16(pubs[4], 3) == 0xFFD9 and pubs[4][7:] == b'\x04',
+      f'free UART ports: UART2: {pubs[4][7:].hex(" ")}')
 clock_set = [m for m in h.node_msgs() if m[1] == g.PUBACK and g.u16(m, 2) == 0xFF07]
 check(clock_set and clock_set[0][6] == 0, 'clock set by the gateway after the session')
 dhcp = h.node_msgs()[0]

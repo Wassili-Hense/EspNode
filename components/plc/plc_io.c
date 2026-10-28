@@ -437,6 +437,22 @@ void plc_io_init(const plc_io_config_t *cfg)
     }
 }
 
+uint64_t plc_io_free_pins(void)
+{
+    uint64_t pins = 0;
+    for (uint32_t i = 0; i < PLC_HW_PINS; i++) {
+        if ((plc_hw_caps(i) & PLC_HW_CAP_VALID) && !(s.reserved_pins & (1ull << i))) {
+            pins |= 1ull << i;
+        }
+    }
+    return pins;
+}
+
+uint8_t plc_io_free_uarts(void)
+{
+    return (uint8_t)(((1u << 1) | (1u << 2)) & ~s.reserved_uarts);
+}
+
 void plc_io_restart_begin(void)
 {
     for (int i = 0; i < PLC_HW_PINS; i++) {

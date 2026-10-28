@@ -151,6 +151,11 @@ static void test_analog(void)
     CHECK(CFG(33, ANALOG, 4) == PLC_ERR_PARM);
     CHECK(CFG(33, ANALOG, -1) == PLC_ERR_PARM);
     CHECK(CFG(4, ANALOG, 0) == PLC_ERR_PARM);       // ADC2, taken by WiFi
+
+    // Device info: existing pins without the reserved ones, UART2 (UART1 reserved)
+    const uint64_t valid = 0xFFFFFFFFFFull & ~((1ull << 20) | (1ull << 24) | 0xF0000000ull);
+    CHECK(plc_io_free_pins() == (valid & ~(0xFC0ull | (1ull << 1) | (1ull << 3) | (1ull << 16) | (1ull << 17))));
+    CHECK(plc_io_free_uarts() == (1u << 2));
     CHECK(CFG(39, ANALOG, 0) == PLC_RUN);
 
     // Without WiFi ADC2 too; a pin with no ADC still not

@@ -189,6 +189,13 @@ static const od_entry_t *find_entry(uint16_t id, uint8_t flags)
                 return &s_predef[i];
             }
         }
+        for (size_t p = 0; p < s.n_providers; p++) {
+            for (size_t i = 0; i < s.providers[p]->n_info; i++) {
+                if (s.providers[p]->info[i].topic_id == id) {
+                    return &s.providers[p]->info[i];
+                }
+            }
+        }
         break;
 
     default:
@@ -284,6 +291,31 @@ static uint16_t cfg_version(const char *device_type)
 ////////////////////////////////////////////////////////////////////////
 // Session
 
+// Device info after RTC: the first predefined object from the device type on with an id >= from, own or of
+// a provider; SESSION_DONE if none
+static uint16_t next_info_id(uint16_t from)
+{
+    uint16_t next = SESSION_DONE;
+    if (from < OD_ID_DEVICE_TYPE) {
+        from = OD_ID_DEVICE_TYPE;
+    }
+    for (size_t i = 0; i < sizeof(s_predef) / sizeof(s_predef[0]); i++) {
+        uint16_t id = s_predef[i].topic_id;
+        if ((id >= from) && (id < next)) {
+            next = id;
+        }
+    }
+    for (size_t p = 0; p < s.n_providers; p++) {
+        for (size_t i = 0; i < s.providers[p]->n_info; i++) {
+            uint16_t id = s.providers[p]->info[i].topic_id;
+            if ((id >= from) && (id < next)) {
+                next = id;
+            }
+        }
+    }
+    return next;
+}
+
 // PRE_CONNECT: restore registrations, publish device info, subscribe (X13: OD_Poll)
 static void session_step(void)
 {
@@ -296,11 +328,12 @@ static void session_step(void)
             s.idx++;
         }
     } else if (s.idx != SESSION_DONE) {
-        // Device info: RTC, then the objects from the device type on (X13: objRTC, objDeviceTyp)
+        // Device info: RTC, then the objects from the device type on by id (X13: objRTC, objDeviceTyp and on
+        // up to the first missing id; here gaps are skipped, to the objects of the providers)
         if (s.idx < OD_ID_RTC) {
             s.idx = OD_ID_RTC;
-        } else if ((s.idx > OD_ID_RTC) && (s.idx < OD_ID_DEVICE_TYPE)) {
-            s.idx = OD_ID_DEVICE_TYPE;
+        } else if (s.idx > OD_ID_RTC) {
+            s.idx = next_info_id(s.idx);
         }
         if (mqttsn_client_can_send()) {
             const od_entry_t *entry = find_entry(s.idx, MQTTSN_FL_TOPICID_PREDEF);

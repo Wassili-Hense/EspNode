@@ -57,6 +57,8 @@ extern "C" {
 #define OD_ID_GATE_ID           0xFF14  // UInt8, gateway address, 0xFF - search
 #define OD_ID_DEVICE_TYPE       0xFFC0  // String, read only
 #define OD_ID_PHY1_ADDR         0xFFC1  // Array, read only
+#define OD_ID_FREE_PINS         0xFFD8  // Array, read only: GPIOs free for the PLC program (plc provider)
+#define OD_ID_FREE_UARTS        0xFFD9  // UInt8, read only: UART ports free for the PLC program (plc provider)
 
 // Topic id of a dynamic object
 #define OD_TOPIC_NEW            0x0000  // Not registered yet
@@ -95,6 +97,9 @@ typedef struct {
     void    (*init)(void);                      // Optional, called from od_init()
     void    (*proc)(void);                      // Optional, called from od_poll()
     void    (*on_session)(void);                // Optional, device info published (PRE_CONNECT)
+    // Optional, read-only predefined objects (ids from OD_ID_DEVICE_TYPE on), published with the device info
+    const od_entry_t *info;
+    size_t  n_info;
 } od_provider_t;
 
 typedef struct {

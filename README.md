@@ -9,7 +9,7 @@ PLC: пины, ШИМ, АЦП, ЦАП, счётчики, шины TWI и UART.
   DHCP-адресация 0x43/0x44, predefined-объекты 0xFFxx).
 - PLC: байткод компилятора Enviriot с float-командами, загрузка через объект `pa1` (протокол `pa0` X13), переменные —
   мерке́ры `M…`, ввод-вывод — `ConfigPin` и опкоды `IN`/`OUT` по номеру GPIO
-  ([docs/plc-api.md](docs/plc-api.md)). Что нужно в Enviriot — [docs/enviriot-todo.md](docs/enviriot-todo.md).
+  ([docs/plc-api.md](docs/plc-api.md)).
 
 ## Структура
 

@@ -50,6 +50,11 @@ typedef struct {
 
 void         plc_io_init(const plc_io_config_t *cfg);
 
+// What the program may use on this node, for the device info: GPIOs (bit n - GPIOn) and UART ports of the
+// program modes, UART1 and UART2 (bit n - UARTn)
+uint64_t     plc_io_free_pins(void);
+uint8_t      plc_io_free_uarts(void);
+
 // Program (re)start: pins configured again with the same mode and option keep running untouched,
 // pins not configured again by the end of the first (init) cycle are released
 void         plc_io_restart_begin(void);
