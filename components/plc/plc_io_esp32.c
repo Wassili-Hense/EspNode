@@ -442,6 +442,10 @@ bool plc_hw_twi_open(int bus, uint32_t sda, uint32_t scl, uint32_t khz)
 
     // A missing device is a status for the program, not a console error on every request
     esp_log_level_set("i2c.master", ESP_LOG_NONE);
+    // After a failed transfer the ESP32 driver clears the bus and sets its pins up again, reserving them once
+    // more: "GPIO n is not usable, maybe conflict with others" (i2c_common.c) about its own pins, twice on every
+    // request to a device without power. False: plc_io gives a pin to one user. Errors stay.
+    esp_log_level_set("i2c.common", ESP_LOG_ERROR);
     __atomic_store_n(&t->result, TWI_IDLE, __ATOMIC_RELAXED);
     return true;
 }

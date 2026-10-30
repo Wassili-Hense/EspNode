@@ -160,7 +160,7 @@ def stream():
     """Streams. UART2 9600 8N1, TX GPIO4 (to RX of a USB-UART adapter), RX GPIO5. Once a second a line to
     UART2: "<NowSeconds> <getSeconds / 3, 2 digits>\\r\\n"; every 10 s a line to the node log, Info:
     "t=<getSeconds> v=<getSeconds / 3, width 8, 2 digits>". Md0 = NowSeconds sent, Md1 = result of
-    SendFloatAsString to UART2, Md2 = log lines, Md3 = second of the last send."""
+    PrintFloat to UART2, Md2 = log lines, Md3 = second of the last send."""
     third = 0x40400000                  # 3.0f
     init = Asm().call(CONFIG_PIN, 4, UART2_TX, 9600).call(CONFIG_PIN, 5, UART2_RX, 0)
     cycle = Asm().call(SECONDS).ld(3).op(CEQ).jump(JNZ, 'end') \
