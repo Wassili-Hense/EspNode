@@ -22,8 +22,8 @@ enum {
     PLC_API_UART_AVAIL      = 21,   // int UartBytesToRead(int port), as X13
     PLC_API_UART_GET        = 22,   // int UartGetByte(int port)
     PLC_API_SEND_BYTE       = 23,   // bool SendByte(int stream, int data) = UartPutByte(int port, int data)
-    PLC_API_PRINT_INT       = 24,   // bool PrintInt32(int stream, int value)
-    PLC_API_PRINT_FLOAT     = 25,   // bool PrintFloat(int stream, int format, float value)
+    PLC_API_PRINT_F         = 26,   // bool PrintF(int stream, "format", values...): the stream, the format
+                                    // address in the program, its length, the number of values, the values
     PLC_API_CONFIG_PIN      = 31,   // void ConfigPin(int pin, int mode, int option)
     PLC_API_TWI_BUS         = 39,   // 40-43: TWI functions 1-4 with the bus as the first argument
 };

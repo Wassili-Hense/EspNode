@@ -239,15 +239,41 @@ def f32(x):
     return struct.unpack('<I', struct.pack('<f', x))[0]
 
 
-LOG_INIT = (send(24, 0xFFE1, 1234) + send(23, 0xFFE2, ord('T')) + send(23, 0xFFE2, ord('='))
-            + send(25, 0xFFE2, 3, f32(21.456)) + send(23, 0xFFE2, 0) + send(24, 0xFFE2, -7 & 0xFFFFFFFF) + [0xFF])
-LOG_PRG = program_init(LOG_INIT, [0xFF])
+def printf(stream, fmt_addr, fmt, *vals):
+    """PrintF as the compiler calls it: the values last first, their number, the format length and address in
+    the program, the stream on top; drop the result."""
+    code = []
+    for v in reversed(vals):
+        code += [0x3B] + list(struct.pack('<I', v & 0xFFFFFFFF))
+    code += [0x3B] + list(struct.pack('<I', len(vals)))
+    code += [0x3D] + list(struct.pack('<H', len(fmt))) + [0x3D] + list(struct.pack('<H', fmt_addr))
+    return code + [0x3D, stream & 0xFF, stream >> 8, 0xC6, 26, 0x03]
+
+
+def program_data(init_of, cycle, data):
+    """program_init() with data after the init code, init_of(address of the data) gives the init code."""
+    at = 4 + len(cycle) + len(init_of(0))
+    return program_init(init_of(at), cycle) + data
+
+
+F1, F2 = b'T=%.2f\x00n=%d', b'%08X %c'
+LOG_PRG = program_data(lambda at: printf(0xFFE2, at, F1, f32(21.456), -7) + printf(0xFFE1, at + len(F1), F2, 0xBEEF, 0x41)
+                       + [0xFF], [0xFF], F1 + F2)
 mark = h.ms
 r = plc.upload(LOG_PRG, stack_bottom=0)
 h.run(500)
 logs = [(g.u16(m, 3), m[2], m[7:]) for m in h.node_msgs(mark) if m[1] == g.PUBLISH and 0xFFE0 <= g.u16(m, 3) <= 0xFFE3]
-check(r == bytes([2, 0]) and logs == [(0xFFE2, 0x01, b'T=21.46'), (0xFFE1, 0x01, b'1234'), (0xFFE2, 0x01, b'-7')],
-      f'program lines in the node log, once: {logs}')
+check(r == bytes([2, 0]) and logs == [(0xFFE2, 0x01, b'T=21.46'), (0xFFE1, 0x01, b'0000BEEF A'), (0xFFE2, 0x01, b'n=-7')],
+      f'PrintF lines in the node log, once: {logs}')
+
+# A format outside the program stops with 0x8A
+BAD_FMT = program(*(printf(0xFFE1, 0xFFF0, b'xxxxxxxxxxxxxxxxxxxx') + [0xFF]))
+mark = h.ms
+r = plc.upload(BAD_FMT, stack_bottom=0)
+h.run(500, until=lambda: any(len(x) == 18 for x in plc.responses(mark)))
+h.run(100)                              # The next mark after this report
+rep = [x for x in plc.responses(mark) if len(x) == 18]
+check(rep and rep[0][1] == 0x8A, f'PrintF format outside the program: {rep[0].hex(" ") if rep else None}')
 
 # Stop on an error: what the cycle wrote still goes
 LOG_DIV0 = program(*(send(23, 0xFFE3, ord('E')) + [0x3E, 0x38, 0x13, 0xFF]))      # 'E', then 1 / 0

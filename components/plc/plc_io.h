@@ -34,12 +34,16 @@ enum {
     PLC_PIN_TWI0_SCL    = 17,   // ... option - clock, kHz (0 - 100)
     PLC_PIN_TWI1_SDA    = 18,   // TWI bus 1
     PLC_PIN_TWI1_SCL    = 19,
-    PLC_PIN_UART1_TX    = 20,   // UART1; option - baud rate (0 - 9600)
-    PLC_PIN_UART1_RX    = 21,   // ... option - format: bits 0-1 parity (0 none, 1 even, 2 odd), bit 2 two stop bits
-    PLC_PIN_UART1_DE    = 22,   // ... RS-485 driver enable
-    PLC_PIN_UART2_TX    = 23,   // UART2
-    PLC_PIN_UART2_RX    = 24,
-    PLC_PIN_UART2_DE    = 25,
+    PLC_PIN_UART0_TX    = 20,   // UART0, when neither the console nor the MQTT-SN link uses it (E1W10);
+                                // option - baud rate (0 - 9600)
+    PLC_PIN_UART0_RX    = 21,   // ... option - format: bits 0-1 parity (0 none, 1 even, 2 odd), bit 2 two stop bits
+    PLC_PIN_UART0_DE    = 22,   // ... RS-485 driver enable
+    PLC_PIN_UART1_TX    = 23,   // UART1
+    PLC_PIN_UART1_RX    = 24,
+    PLC_PIN_UART1_DE    = 25,
+    PLC_PIN_UART2_TX    = 26,   // UART2
+    PLC_PIN_UART2_RX    = 27,
+    PLC_PIN_UART2_DE    = 28,
     PLC_PIN_MODES
 };
 
@@ -52,7 +56,7 @@ typedef struct {
 void         plc_io_init(const plc_io_config_t *cfg);
 
 // What the program may use on this node, for the device info: GPIOs (bit n - GPIOn) and UART ports of the
-// program modes, UART1 and UART2 (bit n - UARTn)
+// program modes, UART0..UART2 (bit n - UARTn)
 uint64_t     plc_io_free_pins(void);
 uint8_t      plc_io_free_uarts(void);
 
@@ -85,7 +89,7 @@ plc_status_t plc_io_twi_status(uint32_t bus, uint32_t *status);
 plc_status_t plc_io_twi_put(uint32_t bus, uint32_t byte);
 plc_status_t plc_io_twi_get(uint32_t bus, uint32_t *byte);
 
-// UART as in X13 (API 21-22), the port is the UART number. Bytes to read are reported after a pause:
+// UART as in X13 (API 21-22), the port is the UART number 0..2. Bytes to read are reported after a pause:
 // when nothing new arrived since the previous call (end of a frame) or the buffer is half full.
 plc_status_t plc_io_uart_avail(uint32_t port, uint32_t *count);
 plc_status_t plc_io_uart_get(uint32_t port, uint32_t *value);      // 0xFFFFFFFF (-1) - empty

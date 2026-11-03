@@ -83,6 +83,8 @@ void         plc_vm_regs(plc_vm_regs_t *regs);
 uint32_t     plc_vm_pop(void);
 void         plc_vm_push(uint32_t val);
 plc_status_t plc_vm_status(void);       // PLC_RUN while the cycle has no error
+// len bytes of the program at addr (data the compiler put there, a PrintF format), NULL - outside the program
+const uint8_t *plc_vm_program(uint32_t addr, uint32_t len);
 
 #ifdef __cplusplus
 }

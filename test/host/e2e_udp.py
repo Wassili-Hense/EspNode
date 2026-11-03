@@ -67,6 +67,7 @@ check(all(d == GW for d, _ in sent[1:]), 'after GWINFO everything to the gateway
 check(h.gw.client_id == 'E1W10_A1B2C3', f'default name from the MAC: {h.gw.client_id!r}')
 check(published(sent, 0xFFC0) == [b'E1W10.400'], f'device type {published(sent, 0xFFC0)}')
 check(published(sent, 0xFFC1) == [IP], f'PHY1 address is the IP: {published(sent, 0xFFC1)}')
+check(published(sent, 0xFFD9) == [b'\x07'], f'all UART ports free for the program: {published(sent, 0xFFD9)}')
 
 # 2. A message from another host is ignored, the same from the gateway is taken
 mark = h.ms

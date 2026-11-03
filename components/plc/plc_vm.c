@@ -191,6 +191,11 @@ plc_status_t plc_vm_status(void)
     return s.stat;
 }
 
+const uint8_t *plc_vm_program(uint32_t addr, uint32_t len)
+{
+    return ((addr <= s.prg_size) && (len <= s.prg_size - addr)) ? &s.prg[addr] : NULL;
+}
+
 #define pop     plc_vm_pop
 #define push    plc_vm_push
 

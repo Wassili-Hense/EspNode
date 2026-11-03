@@ -24,6 +24,13 @@ static bool args(uint32_t *arg, int n)
     return plc_vm_status() == PLC_RUN;
 }
 
+// Values of PrintF, in the order of its format: the compiler pushed them last first
+static bool next_arg(uint32_t *value)
+{
+    *value = pop();
+    return plc_vm_status() == PLC_RUN;
+}
+
 // Push the result of a function that succeeded. The value by pointer: read after the call that
 // writes it, the order of evaluating arguments is unspecified (gcc on x86-64 goes right to left)
 static plc_status_t result(plc_status_t stat, const uint32_t *val)
@@ -61,7 +68,7 @@ static plc_status_t twi_call(uint8_t func, bool with_bus)
 
 plc_status_t plc_api_call(uint8_t func)
 {
-    uint32_t a[3];
+    uint32_t a[4];
     uint32_t val = 0;
 
     switch (func) {
@@ -115,16 +122,16 @@ plc_status_t plc_api_call(uint8_t func)
             return PLC_ERR_OFR_SP;
         }
         return result(plc_stream_byte(a[0], a[1], &val), &val);
-    case PLC_API_PRINT_INT:
-        if (!args(a, 2)) {
+    case PLC_API_PRINT_F: {
+        if (!args(a, 4)) {
             return PLC_ERR_OFR_SP;
         }
-        return result(plc_stream_int(a[0], a[1], &val), &val);
-    case PLC_API_PRINT_FLOAT:
-        if (!args(a, 3)) {
-            return PLC_ERR_OFR_SP;
+        const uint8_t *fmt = plc_vm_program(a[1], a[2]);
+        if (fmt == NULL) {
+            return PLC_ERR_PARM;
         }
-        return result(plc_stream_float(a[0], a[1], a[2], &val), &val);
+        return result(plc_stream_printf(a[0], fmt, a[2], a[3], next_arg, &val), &val);
+    }
 
     case PLC_API_CONFIG_PIN:
         if (!args(a, 3)) {

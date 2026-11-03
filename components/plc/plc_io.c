@@ -108,6 +108,9 @@ static group_t group_of(uint32_t mode)
     case PLC_PIN_TWI1_SDA:
     case PLC_PIN_TWI1_SCL:
         return GRP_TWI;
+    case PLC_PIN_UART0_TX:
+    case PLC_PIN_UART0_RX:
+    case PLC_PIN_UART0_DE:
     case PLC_PIN_UART1_TX:
     case PLC_PIN_UART1_RX:
     case PLC_PIN_UART1_DE:
@@ -126,9 +129,10 @@ static bool inverted(uint32_t mode)
            (mode == PLC_PIN_PWM_INV);
 }
 
-// TWI: bus 0/1; UART: port 1/2
+// TWI: bus 0/1; UART: port 0..2, TX, RX and DE of each in a row
 static int twi_bus(uint32_t mode)     { return (int)(mode - PLC_PIN_TWI0_SDA) / 2; }
-static int uart_port(uint32_t mode)   { return 1 + (int)(mode - PLC_PIN_UART1_TX) / 3; }
+static int uart_port(uint32_t mode)   { return (int)(mode - PLC_PIN_UART0_TX) / 3; }
+static uint32_t uart_tx(int port)     { return PLC_PIN_UART0_TX + (uint32_t)port * 3; }
 
 static uint32_t twi_mode(int bus, bool scl)
 {
@@ -137,7 +141,7 @@ static uint32_t twi_mode(int bus, bool scl)
 
 static uint32_t uart_mode(int port, int role)       // role: 0 TX, 1 RX, 2 DE
 {
-    return PLC_PIN_UART1_TX + (uint32_t)(port - 1) * 3 + (uint32_t)role;
+    return uart_tx(port) + (uint32_t)role;
 }
 
 static int find_pin(uint32_t mode)
@@ -402,7 +406,7 @@ static plc_status_t setup(uint32_t pin, uint32_t mode, int32_t option)
 
     case GRP_UART: {
         int port = uart_port(mode);
-        int role = (int)(mode - PLC_PIN_UART1_TX) % 3;
+        int role = (int)(mode - uart_tx(port));
         if (s.reserved_uarts & (1u << port)) {
             return PLC_ERR_RSC_BUSY;        // Used by the MQTT-SN link
         }
@@ -450,7 +454,7 @@ uint64_t plc_io_free_pins(void)
 
 uint8_t plc_io_free_uarts(void)
 {
-    return (uint8_t)(((1u << 1) | (1u << 2)) & ~s.reserved_uarts);
+    return (uint8_t)(((1u << PLC_HW_UART_PORTS) - 1) & ~s.reserved_uarts);
 }
 
 void plc_io_restart_begin(void)
@@ -759,7 +763,7 @@ plc_status_t plc_io_twi_get(uint32_t bus, uint32_t *byte)
 
 static bool uart_ready(uint32_t port)
 {
-    return (port >= 1) && (port < PLC_HW_UART_PORTS) && s.uart[port].open;
+    return (port < PLC_HW_UART_PORTS) && s.uart[port].open;
 }
 
 plc_status_t plc_io_uart_avail(uint32_t port, uint32_t *count)

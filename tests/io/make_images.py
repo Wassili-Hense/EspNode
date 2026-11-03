@@ -22,14 +22,14 @@ MILLIS, SECONDS, NOW_SECONDS = 6, 7, 9
 CONFIG_PIN = 31                        # ConfigPin(pin, mode, option)
 TWI_CONTROL, TWI_STATUS = 1, 2        # Bus 0, as X13
 UART_AVAIL, UART_GET, UART_PUT = 21, 22, 23
-SEND_BYTE, SEND_INT, SEND_FLOAT = 23, 24, 25    # Streams: SendByte = UartPutByte
+PRINT_F = 26                            # PrintF(stream, format, values...)
 LOG_INFO = 0xFFE1                       # Stream: node log, Info
 TWI_RDY, TWI_FAILED = 0x10 << 8, 0xE0 << 8     # Status bits: access << 8
 
 # Pin modes
 IN_PU, OUT_ = 2, 5
 ANALOG, DAC, PWM, CNT_RISE = 9, 10, 11, 13
-TWI0_SDA, TWI0_SCL, UART2_TX, UART2_RX = 16, 17, 23, 24
+TWI0_SDA, TWI0_SCL, UART2_TX, UART2_RX = 16, 17, 26, 27
 
 STACK_BOTTOM = 4                        # Md0..Md3 are the data of every program
 
@@ -41,6 +41,7 @@ class Asm:
         self.code = []
         self.labels = {}
         self.fixups = []
+        self.formats = []               # (code offset, format) of PrintF, placed by image()
 
     def op(self, *b):
         self.code += b
@@ -72,10 +73,11 @@ class Asm:
             self.ldi(a)
         return self.op(API, func)
 
-    def text(self, stream, s):          # SendByte for each character, results dropped
-        for c in s.encode():
-            self.call(SEND_BYTE, stream, c).op(DROP)
-        return self
+    def printf(self, stream, fmt, n):
+        """PrintF as the compiler calls it, the n values pushed before, last first; leaves the result."""
+        self.ldi(n).ldi(len(fmt))
+        self.formats.append((len(self.code) + 1, fmt))
+        return self.op(LDI_U2, 0, 0).ldi(stream).op(API, PRINT_F)
 
     def label(self, name):
         self.labels[name] = len(self.code)
@@ -93,10 +95,18 @@ class Asm:
 
 
 def image(init, cycle):
-    """Address 0 jumps to init, the cycle starts at 4, init follows the cycle."""
-    cycle_code = cycle.op(RET).assemble(4)
+    """Address 0 jumps to init, the cycle starts at 4, init follows the cycle, then the PrintF formats."""
+    cycle_code = bytearray(cycle.op(RET).assemble(4))
     init_at = 4 + len(cycle_code)
-    return bytes([JMP, init_at & 0xFF, init_at >> 8, RET]) + cycle_code + init.op(RET).assemble(init_at)
+    init_code = bytearray(init.op(RET).assemble(init_at))
+    data, where = bytearray(), {}
+    for code, asm in ((cycle_code, cycle), (init_code, init)):
+        for at, fmt in asm.formats:
+            if fmt not in where:
+                where[fmt] = init_at + len(init_code) + len(data)
+                data += fmt
+            code[at:at + 2] = where[fmt].to_bytes(2, 'little')
+    return bytes([JMP, init_at & 0xFF, init_at >> 8, RET]) + bytes(cycle_code) + bytes(init_code) + bytes(data)
 
 
 def blink(period_ms):
@@ -157,19 +167,19 @@ def uart_loop():
 
 
 def stream():
-    """Streams. UART2 9600 8N1, TX GPIO4 (to RX of a USB-UART adapter), RX GPIO5. Once a second a line to
-    UART2: "<NowSeconds> <getSeconds / 3, 2 digits>\\r\\n"; every 10 s a line to the node log, Info:
-    "t=<getSeconds> v=<getSeconds / 3, width 8, 2 digits>". Md0 = NowSeconds sent, Md1 = result of
-    PrintFloat to UART2, Md2 = log lines, Md3 = second of the last send."""
+    """PrintF. UART2 9600 8N1, TX GPIO4 (to RX of a USB-UART adapter), RX GPIO5. Once a second a line to UART2:
+    "<NowSeconds, width 5> <getSeconds / 3, 2 digits> 0x<getSeconds, 4 hex digits>\\r\\n"; every 10 s a line to
+    the node log, Info: "t=<getSeconds> v=<getSeconds / 3, width 8, 2 digits>". Md0 = NowSeconds sent, Md1 = result
+    of PrintF to UART2, Md2 = log lines, Md3 = second of the last send."""
     third = 0x40400000                  # 3.0f
     init = Asm().call(CONFIG_PIN, 4, UART2_TX, 9600).call(CONFIG_PIN, 5, UART2_RX, 0)
     cycle = Asm().call(SECONDS).ld(3).op(CEQ).jump(JNZ, 'end') \
         .call(SECONDS).st(3) \
-        .call(NOW_SECONDS).op(DUP).st(0).ldi(2).op(API, SEND_INT).op(DROP).text(2, ' ') \
-        .ld(3).op(S32TOF).ldi(third).op(FDIV).ldi(3).ldi(2).op(API, SEND_FLOAT).st(1).text(2, '\r\n') \
+        .ld(3).ld(3).op(S32TOF).ldi(third).op(FDIV).call(NOW_SECONDS).op(DUP).st(0) \
+        .printf(2, b'%5d %.2f 0x%04X\r\n', 3).st(1) \
         .ld(3).ldi(10).op(MOD).jump(JNZ, 'end') \
-        .text(LOG_INFO, 't=').ld(3).ldi(LOG_INFO).op(API, SEND_INT).op(DROP).text(LOG_INFO, ' v=') \
-        .ld(3).op(S32TOF).ldi(third).op(FDIV).ldi(183).ldi(LOG_INFO).op(API, SEND_FLOAT).op(DROP) \
+        .ld(3).op(S32TOF).ldi(third).op(FDIV).ld(3) \
+        .printf(LOG_INFO, b't=%d v=%8.2f', 2).op(DROP) \
         .ld(2).ldi(1).op(ADD).st(2) \
         .label('end')
     return image(init, cycle)

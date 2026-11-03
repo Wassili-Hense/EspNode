@@ -210,9 +210,10 @@ static void start(void)
     node_log_reset(NODE_LOG_WARN);
     fake_reset();
     fake_now_ms = sim_ms;
+    // As main.c: flash; E1S10 - MQTT-SN on UART0, TX 1, RX 3; E1W10 (UDP) - nothing more
     const plc_config_t plc_cfg = {
-        .reserved_pins = 0xFC0ull | (1ull << 1) | (1ull << 3), .reserved_uarts = 1u << 1, .adc2 = !udp.on,
-        .log = plc_log,
+        .reserved_pins = 0xFC0ull | (udp.on ? 0 : (1ull << 1) | (1ull << 3)), .reserved_uarts = udp.on ? 0 : 1u << 0,
+        .adc2 = !udp.on, .log = plc_log,
     };
     if (plc_init(&plc_cfg) != ESP_OK) { fprintf(stderr, "plc_init failed\n"); exit(1); }
     static const od_provider_t *providers[1];

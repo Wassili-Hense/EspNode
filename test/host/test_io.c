@@ -26,12 +26,12 @@ uint32_t esp_random(void) { return 4; }
 int64_t esp_timer_get_time(void) { return fake_now_ms * 1000; }
 mqttsn_status_t mqttsn_client_status(void) { return MQTTSN_STATUS_CONNECT; }
 
-// As main.c: flash 6-11, console 1/3, MQTT-SN link on UART1 16/17
+// As main.c of a debug build: flash 6-11, console on UART0 1/3, MQTT-SN link on UART1 16/17
 static void setup(void)
 {
     const plc_io_config_t cfg = {
         .reserved_pins  = 0xFC0ull | (1ull << 1) | (1ull << 3) | (1ull << 16) | (1ull << 17),
-        .reserved_uarts = 1u << 1,
+        .reserved_uarts = (1u << 0) | (1u << 1),
     };
     fake_reset();
     plc_io_init(&cfg);
@@ -54,7 +54,7 @@ static void test_pins(void)
     CHECK(CFG(6, IN, 0) == PLC_ERR_PARM);           // Flash
     CHECK(CFG(1, OUT, 0) == PLC_ERR_PARM);          // Console
     CHECK(CFG(16, IN, 0) == PLC_ERR_PARM);          // MQTT-SN link
-    CHECK(CFG(4, MODES, 0) == PLC_ERR_PARM);        // 26, no such mode
+    CHECK(CFG(4, MODES, 0) == PLC_ERR_PARM);        // 29, no such mode
     CHECK(plc_io_config(4, 0xFFFFFFFF, 0) == PLC_ERR_PARM);
     CHECK(CFG(4, OFF, 0) == PLC_RUN);               // Free pin: nothing to do
     CHECK(fake_calls[0] == 0);
@@ -439,6 +439,7 @@ static void test_uart(void)
     uint32_t v;
     setup();
     CHECK(CFG(4, UART1_TX, 0) == PLC_ERR_RSC_BUSY);    // MQTT-SN link
+    CHECK(CFG(4, UART0_TX, 0) == PLC_ERR_RSC_BUSY);    // Console
     CHECK(CFG(4, UART2_TX, 115200) == PLC_RUN);
     CHECK(!CALLED("uart_open"));
     CHECK(plc_io_uart_avail(2, &v) == PLC_ERR_PARM);    // Not open yet
@@ -512,6 +513,29 @@ static void test_uart(void)
     fake_fail = NULL;
     CHECK(CFG(5, UART2_RX, 0) == PLC_RUN);
     CHECK(CALLED("uart_open 2 4 5 -1 9600 0"));
+
+    // E1W10: no console, MQTT-SN over WiFi - UART0 too, on any pins, with DE
+    const plc_io_config_t wifi = { .reserved_pins = 0xFC0ull };
+    fake_reset();
+    plc_io_init(&wifi);
+    CHECK(plc_io_free_uarts() == 0x07);
+    CHECK(CFG(1, UART0_TX, 115200) == PLC_RUN);
+    CHECK(!plc_io_uart_ready(0));
+    CHECK(CFG(3, UART0_RX, 0) == PLC_RUN);
+    CHECK(CALLED("uart_open 0 1 3 -1 115200 0") && plc_io_uart_ready(0));
+    uart_receive(0, (const uint8_t *)"Z", 1);
+    CHECK((uart_avail(0) == 0) && (uart_avail(0) == 1));
+    CHECK((plc_io_uart_get(0, &v) == PLC_RUN) && (v == 'Z'));
+    CHECK(plc_io_uart_write(0, (const uint8_t *)"Q", 1) == 1);
+    CHECK((fake_uart_tx_len[0] == 1) && (fake_uart_tx[0][0] == 'Q'));
+    fake_clear();
+    CHECK(CFG(18, UART0_DE, 0) == PLC_RUN);
+    CHECK(CALLED("uart_close 0") && CALLED("uart_open 0 1 3 18 115200 0"));
+    CHECK(CFG(19, UART0_TX, 0) == PLC_ERR_RSC_BUSY);   // Role taken by GPIO1
+    CHECK(CFG(4, UART2_TX, 0) == PLC_RUN);              // The other ports as before
+    CHECK(CFG(5, UART2_RX, 0) == PLC_RUN);
+    CHECK(CALLED("uart_open 2 4 5 -1 9600 0"));
+    CHECK(plc_io_config(4, PLC_PIN_MODES, 0) == PLC_ERR_PARM);  // 29, no such mode
 }
 
 static void test_restart(void)
@@ -685,8 +709,8 @@ static void test_program(void)
     // ram[2] = UartPutByte(2, 0x41)
     setup();
     {
-        const uint8_t init[] = { LDI_0, LDI_U1, 23, LDI_U1, 4, API, 31,
-                                 LDI_0, LDI_U1, 24, LDI_U1, 5, API, 31, RET };
+        const uint8_t init[] = { LDI_0, LDI_U1, 26, LDI_U1, 4, API, 31,      // UART2_TX, UART2_RX
+                                 LDI_0, LDI_U1, 27, LDI_U1, 5, API, 31, RET };
         const uint8_t cycle[] = { LDI_U1, 2, API, 22, STM_S4_C16, 0, 0, LDI_U1, 2, API, 21, STM_S4_C16, 1, 0,
                                   LDI_U1, 0x41, LDI_U1, 2, API, 23, STM_S4_C16, 2, 0, RET };
         LOAD(init, cycle);

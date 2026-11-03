@@ -1,5 +1,5 @@
-// Host tests of the PLC output streams (components/plc/plc_stream.c): numbers as text, the node log, UART
-// on fake hardware
+// Host tests of the PLC output streams (components/plc/plc_stream.c): PrintF, the node log, UART on fake
+// hardware
 #include <float.h>
 #include <math.h>
 #include <stdint.h>
@@ -67,23 +67,40 @@ static uint32_t bits(float f)
     return u;
 }
 
-// The float as one Info line
-static int float_is(uint32_t format, float f, const char *text)
+// The values of PrintF, as the VM stack gives them
+static uint32_t vals[16];
+static uint32_t n_vals, taken;
+
+static bool next_val(uint32_t *v)
 {
-    uint32_t ok = 0;
-    n_lines = 0;
-    if ((plc_stream_float(LOG_INFO, format, bits(f), &ok) != PLC_RUN) || !ok) {
-        return 0;
+    if (taken >= n_vals) {
+        return false;
     }
-    plc_stream_flush();
-    return (n_lines == 1) && line_is(0, 1, text);
+    *v = vals[taken++];
+    return true;
 }
 
-static int int_is(int32_t v, const char *text)
+static plc_status_t pf(uint32_t stream, const char *fmt, size_t len, uint32_t n, const uint32_t *v, uint32_t *ok)
+{
+    memcpy(vals, v, n * sizeof(v[0]));
+    n_vals = n;
+    taken = 0;
+    return plc_stream_printf(stream, (const uint8_t *)fmt, len, n, next_val, ok);
+}
+
+// The format is a literal: its length is the one of the literal, a \x00 in it included
+#define ARGS(...)       ((const uint32_t[]){ 0, ##__VA_ARGS__ } + 1)
+#define N_ARGS(...)     ((uint32_t)(sizeof((const uint32_t[]){ 0, ##__VA_ARGS__ }) / sizeof(uint32_t) - 1))
+#define PF(stream, fmt, ...)    pf(stream, fmt, sizeof(fmt) - 1, N_ARGS(__VA_ARGS__), ARGS(__VA_ARGS__), &ok)
+#define PF_IS(text, fmt, ...)   pf_is(text, fmt, sizeof(fmt) - 1, N_ARGS(__VA_ARGS__), ARGS(__VA_ARGS__))
+#define PF_ERR(fmt, ...)        (PF(LOG_INFO, fmt, ##__VA_ARGS__) == PLC_ERR_PARM)
+
+// The output as one Info line, all values taken
+static int pf_is(const char *text, const char *fmt, size_t len, uint32_t n, const uint32_t *v)
 {
     uint32_t ok = 0;
     n_lines = 0;
-    if ((plc_stream_int(LOG_INFO, (uint32_t)v, &ok) != PLC_RUN) || !ok) {
+    if ((pf(LOG_INFO, fmt, len, n, v, &ok) != PLC_RUN) || !ok || (taken != n)) {
         return 0;
     }
     plc_stream_flush();
@@ -101,51 +118,82 @@ static int bytes(uint32_t stream, const char *text)
     return 1;
 }
 
-static int sent(int port, const char *text)
+static int sent(int port, const char *text, size_t len)
 {
-    return (fake_uart_tx_len[port] == strlen(text)) && (memcmp(fake_uart_tx[port], text, strlen(text)) == 0);
+    return (fake_uart_tx_len[port] == len) && (memcmp(fake_uart_tx[port], text, len) == 0);
 }
 
-static void test_numbers(void)
+static void test_printf(void)
+{
+    setup();
+    CHECK(PF_IS("T=", "T="));
+    CHECK(PF_IS("100%", "100%%"));
+    CHECK(PF_IS("A", "%c", 0x141));                     // Low 8 bits
+
+    CHECK(PF_IS("0 -1", "%d %d", 0, (uint32_t)-1));
+    CHECK(PF_IS("-2147483648 2147483647", "%d %d", (uint32_t)INT32_MIN, INT32_MAX));
+    CHECK(PF_IS("   42|42   |-0042", "%5d|%-5d|%05d", 42, 42, (uint32_t)-42));
+    CHECK(PF_IS("12345", "%2d", 12345));                // Width does not cut
+
+    CHECK(PF_IS("deadbeef DEADBEEF", "%x %X", 0xDEADBEEF, 0xDEADBEEF));
+    CHECK(PF_IS("0000001f 000000AB", "%08x %08X", 0x1F, 0xAB));
+    CHECK(PF_IS("a   |ffffffff", "%-4x|%x", 0xA, (uint32_t)-1));
+
+    CHECK(PF_IS("21.500000", "%f", bits(21.5f)));
+    CHECK(PF_IS("21.5 3", "%.1f %.0f", bits(21.46f), bits(2.6f)));
+    CHECK(PF_IS("  2.3|2.3  |-02.3", "%5.1f|%-5.1f|%05.1f", bits(2.26f), bits(2.26f), bits(-2.26f)));
+    CHECK(PF_IS("0.50000000 -3.14", "%.8f %.2f", bits(0.5f), bits(-3.14159f)));
+    CHECK(PF_IS("-0.000000 -0.0", "%f %.1f", bits(-0.0f), bits(-0.0f)));        // Negative zero kept
+    CHECK(PF_IS("nan nan inf -inf", "%f %f %f %f", bits(NAN), bits(-NAN), bits(INFINITY), bits(-INFINITY)));
+    CHECK(PF_IS("  nan|nan  |  inf", "%5f|%-5f|%05f", bits(NAN), bits(NAN), bits(INFINITY)));   // Spaces, as printf
+
+    // The example of docs/plc-api.md: bytes above 0x7F as they are, a \x00 ends the log line
+    uint32_t ok = 0;
+    n_lines = 0;
+    CHECK((PF(LOG_INFO, "%c %d %08x T=%.1f\xB0" "C\x00", 0x11, (uint32_t)-5, 0xBEEF, bits(21.46f)) == PLC_RUN) && ok);
+    CHECK((n_lines == 1) && line_is(0, 1, "\x11 -5 0000beef T=21.5\xB0" "C"));
+    plc_stream_flush();
+    CHECK(n_lines == 1);
+    CHECK((PF(2, "%c %d %08x T=%.1f\xB0" "C\x00", 0x11, (uint32_t)-5, 0xBEEF, bits(21.46f)) == PLC_RUN) && ok);
+    plc_stream_flush();
+    static const char out[] = "\x11 -5 0000beef T=21.5\xB0" "C\x00";       // The 0 goes to the UART
+    CHECK(sent(2, out, sizeof(out) - 1));
+}
+
+static void test_errors(void)
 {
     uint32_t ok;
     setup();
-    CHECK(int_is(0, "0"));
-    CHECK(int_is(-1, "-1"));
-    CHECK(int_is(INT32_MIN, "-2147483648"));
-    CHECK(int_is(INT32_MAX, "2147483647"));
 
-    // format cba: a - 1 digits (0 - %f), width b, c: 0 zeros, 1 spaces left, 2 spaces right
-    CHECK(float_is(0, 21.5f, "21.500000"));
-    CHECK(float_is(3, 21.456f, "21.46"));
-    CHECK(float_is(1, 21.46f, "21"));
-    CHECK(float_is(21, 7.4f, "07"));
-    CHECK(float_is(21, 123.0f, "123"));            // Width is the minimum
-    CHECK(float_is(31, -5.0f, "-05"));
-    CHECK(float_is(152, 2.26f, "  2.3"));
-    CHECK(float_is(252, 2.26f, "2.3  "));
-    CHECK(float_is(141, 3.6f, "   4"));
-    CHECK(float_is(9, 0.5f, "0.50000000"));
-    CHECK(float_is(299, 1.0f, "1.00000000"));
-    CHECK(float_is(3, -3.14159f, "-3.14"));
-    CHECK(float_is(0, NAN, "nan"));
-    CHECK(float_is(0, -NAN, "nan"));               // Windows: "-nan(ind)"
-    CHECK(float_is(141, NAN, " nan"));
-    CHECK(float_is(241, NAN, "nan "));
-    CHECK(float_is(0, INFINITY, "inf"));
-    CHECK(float_is(0, -INFINITY, "-inf"));
-    CHECK(float_is(51, INFINITY, "  inf"));        // As printf: no zeros before inf
-    CHECK(plc_stream_float(LOG_INFO, 300, bits(1.0f), &ok) == PLC_ERR_PARM);
-    CHECK(plc_stream_float(LOG_INFO, 0xFFFFFFFF, bits(1.0f), &ok) == PLC_ERR_PARM);   // -1
+    // What the compiler refuses stops the program
+    CHECK(PF_ERR("%s", 1));
+    CHECK(PF_ERR("%u", 1));
+    CHECK(PF_ERR("%ld", 1));
+    CHECK(PF_ERR("%*d", 1, 1));
+    CHECK(PF_ERR("%+d", 1));
+    CHECK(PF_ERR("%-d", 1));                            // Padding without width
+    CHECK(PF_ERR("%0d", 1));
+    CHECK(PF_ERR("%10d", 1));                           // Width 1..9
+    CHECK(PF_ERR("%.9f", 1));                           // Precision 0..8
+    CHECK(PF_ERR("%.f", 1));
+    CHECK(PF_ERR("%5c", 1));
+    CHECK(PF_ERR("%.1c", 1));
+    CHECK(PF_ERR("%.1d", 1));
+    CHECK(PF_ERR("%.1x", 1));
+    CHECK(PF_ERR("x%", 1));
+    CHECK(PF_ERR("%5", 1));
+    CHECK(PF_ERR("%d"));                                // Values: fewer, more
+    CHECK(PF_ERR("%d", 1, 2));
+    CHECK(PF_ERR("x", 1));
+    CHECK(PF(1, "x") == PLC_ERR_PARM);                  // MQTT-SN link
+    CHECK(PF(PLC_STREAM_LOG + 4, "x") == PLC_ERR_PARM);
+    plc_stream_flush();
+    CHECK((n_lines == 0) && (fake_uart_tx_len[2] == 0));
 
-    // Longer than a log line: whole to the UART
-    n_lines = 0;
-    CHECK((plc_stream_float(LOG_INFO, 0, bits(FLT_MAX), &ok) == PLC_RUN) && (ok == 0));
-    plc_stream_flush();
-    CHECK(n_lines == 0);
-    CHECK((plc_stream_float(2, 0, bits(-FLT_MAX), &ok) == PLC_RUN) && (ok == 1));
-    plc_stream_flush();
-    CHECK(sent(2, "-340282346638528859811704183484516925440.000000"));
+    // Stack underflow
+    n_vals = 0;
+    taken = 0;
+    CHECK(plc_stream_printf(LOG_INFO, (const uint8_t *)"%d", 2, 1, next_val, &ok) == PLC_ERR_OFR_SP);
 }
 
 static void test_streams(void)
@@ -154,11 +202,9 @@ static void test_streams(void)
     setup();
     CHECK(plc_stream_byte(PLC_STREAM_LOG - 1, 'x', &ok) == PLC_ERR_PARM);
     CHECK(plc_stream_byte(PLC_STREAM_LOG + 4, 'x', &ok) == PLC_ERR_PARM);
-    CHECK(plc_stream_byte(0, 'x', &ok) == PLC_ERR_PARM);       // UART0
+    CHECK(plc_stream_byte(0, 'x', &ok) == PLC_ERR_PARM);       // UART0 not open
     CHECK(plc_stream_byte(1, 'x', &ok) == PLC_ERR_PARM);       // MQTT-SN link
     CHECK(plc_stream_byte(3, 'x', &ok) == PLC_ERR_PARM);
-    CHECK(plc_stream_int(1, 5, &ok) == PLC_ERR_PARM);
-    CHECK(plc_stream_float(1, 0, 0, &ok) == PLC_ERR_PARM);
     CHECK((plc_stream_byte(PLC_STREAM_LOG, 'D', &ok) == PLC_RUN) && (ok == 1));
     CHECK((plc_stream_byte(PLC_STREAM_LOG + 3, 'E', &ok) == PLC_RUN) && (ok == 1));
     plc_stream_flush();
@@ -176,12 +222,11 @@ static void test_log(void)
 
     // A 0 byte ends the line at once, the rest ends with the cycle; empty lines are not sent
     CHECK(bytes(LOG_WARN, "T="));
-    CHECK((plc_stream_float(LOG_WARN, 2, bits(21.46f), &ok) == PLC_RUN) && ok);
+    CHECK((PF(LOG_WARN, "%.1f", bits(21.46f)) == PLC_RUN) && ok);
     CHECK((plc_stream_byte(LOG_WARN, 0x100, &ok) == PLC_RUN) && ok);   // Low byte 0
     CHECK((n_lines == 1) && line_is(0, 2, "T=21.5"));
     CHECK((plc_stream_byte(LOG_WARN, 0, &ok) == PLC_RUN) && ok);
-    CHECK(bytes(LOG_WARN, "n="));
-    CHECK((plc_stream_int(LOG_WARN, 7, &ok) == PLC_RUN) && ok);
+    CHECK((PF(LOG_WARN, "n=%d", 7) == PLC_RUN) && ok);
     CHECK((plc_stream_byte(LOG_INFO, 0x141, &ok) == PLC_RUN) && ok);   // Low byte 'A'
     CHECK(n_lines == 1);
     plc_stream_flush();
@@ -189,7 +234,14 @@ static void test_log(void)
     plc_stream_flush();
     CHECK(n_lines == 3);
 
-    // 43 bytes, the 44th does not fit; a number goes whole or not at all
+    // Two lines in one PrintF
+    n_lines = 0;
+    CHECK((PF(LOG_INFO, "a=%d\x00" "b=%d", 1, 2) == PLC_RUN) && ok);
+    CHECK((n_lines == 1) && line_is(0, 1, "a=1"));
+    plc_stream_flush();
+    CHECK((n_lines == 2) && line_is(1, 1, "b=2"));
+
+    // 43 bytes, the 44th does not fit; the output goes whole or not at all
     n_lines = 0;
     for (int i = 0; i < LINE_MAX_LEN; i++) {
         CHECK((plc_stream_byte(LOG_INFO, 'a' + i % 26, &ok) == PLC_RUN) && ok);
@@ -201,10 +253,17 @@ static void test_log(void)
     for (int i = 0; i < LINE_MAX_LEN - 3; i++) {
         bytes(LOG_INFO, "x");
     }
-    CHECK((plc_stream_int(LOG_INFO, 1234, &ok) == PLC_RUN) && (ok == 0));
-    CHECK((plc_stream_int(LOG_INFO, 123, &ok) == PLC_RUN) && (ok == 1));
+    CHECK((PF(LOG_INFO, "%d", 1234) == PLC_RUN) && (ok == 0) && (taken == 1));
+    CHECK((PF(LOG_INFO, "%d", 123) == PLC_RUN) && (ok == 1));
     plc_stream_flush();
     CHECK((n_lines == 1) && (lines[0].len == LINE_MAX_LEN) && (memcmp(&lines[0].text[40], "123", 3) == 0));
+    // The first line would fit, the second not: neither
+    char fmt[LINE_MAX_LEN + 3] = "a";
+    memset(&fmt[2], 'y', LINE_MAX_LEN + 1);
+    n_lines = 0;
+    CHECK((pf(LOG_INFO, fmt, sizeof(fmt), 0, ARGS(), &ok) == PLC_RUN) && (ok == 0));
+    plc_stream_flush();
+    CHECK(n_lines == 0);
 
     // Program start and stop drop what was not sent
     n_lines = 0;
@@ -227,20 +286,20 @@ static void test_uart(void)
     CHECK(fake_uart_tx_len[2] == 0);
     fake_uart_tx_room = 3;
     plc_stream_flush();
-    CHECK(sent(2, "hel"));
-    CHECK((plc_stream_int(2, -42, &ok) == PLC_RUN) && ok);
+    CHECK(sent(2, "hel", 3));
+    CHECK((PF(2, "%d", (uint32_t)-42) == PLC_RUN) && ok);
     fake_uart_tx_room = 100;
     plc_stream_flush();
-    CHECK(sent(2, "hello-42"));
+    CHECK(sent(2, "hello-42", 8));
 
-    // 256 bytes wait; when full, a byte is refused and a number is not cut
+    // 256 bytes wait; when full, a byte is refused and the output of PrintF is not cut
     fake_uart_tx_len[2] = 0;
     fake_uart_tx_room = 0;
     for (int i = 0; i < PLC_STREAM_UART_SIZE - 3; i++) {
         CHECK((plc_stream_byte(2, i, &ok) == PLC_RUN) && ok);
     }
-    CHECK((plc_stream_int(2, 1000, &ok) == PLC_RUN) && (ok == 0));
-    CHECK((plc_stream_int(2, 100, &ok) == PLC_RUN) && (ok == 1));
+    CHECK((PF(2, "%d", 1000) == PLC_RUN) && (ok == 0));
+    CHECK((PF(2, "%d", 100) == PLC_RUN) && (ok == 1));
     CHECK((plc_stream_byte(2, 'x', &ok) == PLC_RUN) && (ok == 0));
     // Through the end of the ring: 10 out, 10 more in, all out
     fake_uart_tx_room = 10;
@@ -260,12 +319,21 @@ static void test_uart(void)
     CHECK(in_order);
     CHECK(memcmp(&fake_uart_tx[2][PLC_STREAM_UART_SIZE - 3], "100ABCDEFGHIJ", 13) == 0);
 
-    // Closed port: its bytes are dropped
+    // Longer than the buffer: refused, the values are taken anyway
+    static char big[PLC_STREAM_UART_SIZE + 2];
+    memset(big, 'x', sizeof(big));
+    memcpy(big, "%d", 2);
     fake_uart_tx_len[2] = 0;
+    CHECK((pf(2, big, sizeof(big), 1, ARGS(5), &ok) == PLC_RUN) && (ok == 0) && (taken == 1));
+    plc_stream_flush();
+    CHECK(fake_uart_tx_len[2] == 0);
+
+    // Closed port: its bytes are dropped
     fake_uart_tx_room = 0;
     CHECK(bytes(2, "old"));
     CHECK(plc_io_config(4, PLC_PIN_OFF, 0) == PLC_RUN);
     CHECK(plc_stream_byte(2, 'x', &ok) == PLC_ERR_PARM);
+    CHECK(PF(2, "x") == PLC_ERR_PARM);
     fake_uart_tx_room = 100;
     plc_stream_flush();
     CHECK(plc_io_config(4, PLC_PIN_UART2_TX, 9600) == PLC_RUN);
@@ -273,12 +341,13 @@ static void test_uart(void)
     CHECK(fake_uart_tx_len[2] == 0);
     CHECK(bytes(2, "new"));
     plc_stream_flush();
-    CHECK(sent(2, "new"));
+    CHECK(sent(2, "new", 3));
 }
 
 int main(void)
 {
-    test_numbers();
+    test_printf();
+    test_errors();
     test_streams();
     test_log();
     test_uart();
