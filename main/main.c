@@ -258,6 +258,7 @@ static void node_task(void *arg)
             .store_node_addr    = store_node_addr,
             .on_forward         = mqttsn_gateway_on_forward,
             .on_advertise       = mqttsn_gateway_on_advertise,
+            .on_session_rx      = od_on_session_rx,
         },
         .now_ms = now_ms,
         .rand16 = rand16,
@@ -362,6 +363,7 @@ void app_main(void)
         .node_id        = s_cfg.node_addr,
         .name_suffix    = wifi ? mac_suffix : NULL,
         .phy1_addr      = wifi ? wifi_phy1_addr : NULL,
+        .rssi           = wifi ? wifi_phy_rssi : NULL,     // 0xFFC8, as X13 RF nodes
     };
     ESP_ERROR_CHECK(od_init(&od_cfg));
 

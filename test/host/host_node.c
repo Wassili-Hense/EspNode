@@ -7,7 +7,7 @@
 // (a gateway link PHY2 from the next "reboot": 1 - serial to an X13 node, 2 - RS-485 bus), "phy2rx <hex
 // frame>", "rs485-phy <0|1>" (PHY1 is an RS-485 bus from the next "reboot"), "busrx <hex RS-485 frame>",
 // "seed <n>" (random numbers: nodes on one bus differ), "log <line of the ESP-IDF log>" (node_log, Warning and up
-// as the default of main.c), "quit".
+// as the default of main.c), "rssi <dBm|none>" (signal level of the WiFi, none - no link), "quit".
 // Output: "tx <hex frame>" (serial), "udp <dst ip hex> <message hex>", "phy2 <hex frame>" (to the node
 // behind) or "bus <hex RS-485 frame>" lines, other results, then "ok".
 #include <inttypes.h>
@@ -126,6 +126,10 @@ static void udp_load_addrs(mqttsn_addr_t *node, mqttsn_addr_t *gateway)
 
 static size_t udp_phy1_addr(uint8_t *buf, size_t max) { size_t n = max < 4 ? max : 4; memcpy(buf, udp.ip, n); return n; }
 
+// wifi_phy_rssi(): the level set by "rssi"
+static struct { int on; int8_t dbm; } rssi;
+static bool udp_rssi(int8_t *dbm) { if (rssi.on) *dbm = rssi.dbm; return rssi.on; }
+
 static int parse_ip(const char *hex, uint8_t *ip)
 {
     unsigned b[4];
@@ -222,6 +226,7 @@ static void start(void)
         .device_type = node_cfg.device_type, .providers = providers, .n_providers = 1,
         .cfg_generation = node_cfg.generation, .node_name = node_cfg.name, .node_id = (uint8_t)node_cfg.node_id,
         .name_suffix = udp.on ? udp.suffix : NULL, .phy1_addr = udp.on ? udp_phy1_addr : NULL,
+        .rssi = udp.on ? udp_rssi : NULL,
     };
     if (od_init(&od_cfg) != ESP_OK) { fprintf(stderr, "od_init failed\n"); exit(1); }
     mqttsn_addr_t node_addr, gw_addr;
@@ -230,7 +235,7 @@ static void start(void)
     const mqttsn_client_config_t cfg = {
         .transport = udp.on ? &udp_transport : bus_phy1 ? &bus_transport : &transport,
         .cb = { od_on_register, od_on_regack, od_on_publish, od_get_client_id, udp.on ? udp_load_addrs : od_load_addrs,
-                store_node_addr, mqttsn_gateway_on_forward, mqttsn_gateway_on_advertise },
+                store_node_addr, mqttsn_gateway_on_forward, mqttsn_gateway_on_advertise, od_on_session_rx },
         .now_ms = now_ms, .rand16 = rand16,
     };
     mqttsn_client_init(&cfg);
@@ -353,6 +358,9 @@ int main(void)
             }
         } else if (!strncmp(line, "log ", 4)) {
             node_log_put(line + 4, strlen(line + 4));
+        } else if (!strncmp(line, "rssi ", 5)) {
+            rssi.on = strcmp(line + 5, "none") != 0;
+            rssi.dbm = (int8_t)atoi(line + 5);
         } else if (!strncmp(line, "seed ", 5)) {
             rng = (uint32_t)strtoul(line + 5, NULL, 0);
         } else if (!strncmp(line, "udprx ", 6)) {

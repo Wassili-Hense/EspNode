@@ -46,6 +46,8 @@ typedef struct {
     void    (*on_forward)(const uint8_t *node_id, size_t id_len, const uint8_t *msg, size_t len);
     // ADVERTISE of the own gateway
     void    (*on_advertise)(const uint8_t *msg, size_t len);
+    // Optional: a message of the gateway in the session (CONNECT), type MQTTSN_*, before it is handled
+    void    (*on_session_rx)(uint8_t type);
 } mqttsn_client_cb_t;
 
 typedef struct {

@@ -316,6 +316,10 @@ void mqttsn_client_handle_rx(const mqttsn_addr_t *src, const uint8_t *msg, size_
     ESP_LOGD(TAG, "rx %s", mqttsn_msg_type_str(type));
     ESP_LOG_BUFFER_HEX_LEVEL(TAG, msg, len, ESP_LOG_DEBUG);
 
+    if (from_gw && (s.status == MQTTSN_STATUS_CONNECT) && (s.cfg.cb.on_session_rx != NULL)) {
+        s.cfg.cb.on_session_rx(type);
+    }
+
     switch (type) {
     case MQTTSN_ADVERTISE:
         if ((s.status == MQTTSN_STATUS_SEARCHGW) && (len >= MQTTSN_SIZEOF_ADVERTISE)) {

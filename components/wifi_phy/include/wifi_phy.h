@@ -38,6 +38,9 @@ esp_err_t wifi_phy_init(const wifi_phy_config_t *cfg, wifi_phy_rx_cb_t rx_cb, wi
 // Transport for mqttsn_client; send() must be called from a single task
 const mqttsn_transport_t *wifi_phy_transport(void);
 
+// Signal level of the access point (its last beacon), dBm; false while the station has no IP
+bool wifi_phy_rssi(int8_t *dbm);
+
 #ifdef __cplusplus
 }
 #endif

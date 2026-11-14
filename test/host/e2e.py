@@ -177,6 +177,14 @@ msgs = h.node_msgs(mark)
 first_log = min(i for i, m in enumerate(msgs) if m[1] == g.PUBLISH and g.u16(m, 3) >= 0xFFE0)
 check(first_log > [m[1] for m in msgs].index(g.SUBSCRIBE), 'the log only in the session, after SUBSCRIBE')
 
+# Signal level 0xFFC8 only with a radio link (WiFi), not on a serial one
+h.cmd('rssi -60')
+mark = h.ms
+h.gw.publish(0xFF09, b'', predef=True)   # A message of the gateway, a ping 2 s later
+h.run(5_000)
+check(not [m for m in h.node_msgs(mark) if m[1] == g.PUBLISH and g.u16(m, 3) == 0xFFC8],
+      'no signal level on a serial node')
+
 h.cmd('quit')
 print(f'{"FAILED" if hn.failed else "ALL PASSED"} in {time.time() - t0:.1f} s real time')
 sys.exit(1 if hn.failed else 0)

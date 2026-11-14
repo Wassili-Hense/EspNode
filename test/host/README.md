@@ -21,7 +21,7 @@ CC=clang python test/host/run.py        # компилятор: $CC, по умо
 | `e2e` (`e2e.py`) | MQTT-SN: подключение, сведения об узле, потеря и возврат шлюза, перезагрузка, новый `cfg` и смена типа, журнал узла — узел `host_node` против `tools/gw_sim.py` |
 | `e2e_gw` (`e2e_gw.py`) | Шлюз: второй `host_node` (E1S10) за этим на PHY2 — DHCP, GWINFO, сессия и PUBLISH через FORWARD, ADVERTISE, чужой PHY, 50 байт, без своей сессии |
 | `e2e_rs485` (`e2e_rs485.py`) | Шина RS-485: шлюз E1SM10 и два узла E1M10 (три `host_node`) — разные адреса по DHCP, GWINFO с адресом шлюза, PUBLISH одному узлу, ADVERTISE всем |
-| `e2e_udp` (`e2e_udp.py`) | MQTT-SN по UDP, как WiFi в `main.c`: адреса IPv4, поиск шлюза, имя из MAC, PHY1 = IP, чужие адреса |
+| `e2e_udp` (`e2e_udp.py`) | MQTT-SN по UDP, как WiFi в `main.c`: адреса IPv4, поиск шлюза, имя из MAC, PHY1 = IP, чужие адреса, уровень сигнала `0xFFC8` |
 | `e2e_plc` (`e2e_plc.py`) | PLC через `pa1`: загрузка как в Enviriot, мерке́ры, отчёт об ошибке, сохранение, ввод-вывод при перезапуске, строки `PrintF` с форматом в программе в журнале, формат за пределами программы |
 
 `host_node` — узел целиком (MQTT-SN, Object Dictionary, PLC) с моделируемым временем; `harness.py` гоняет

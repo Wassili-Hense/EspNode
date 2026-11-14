@@ -5,6 +5,7 @@
  * BSD 3-Clause License. See LICENSE.X13 for details.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_check.h"
@@ -23,6 +24,7 @@ static const char *TAG = "objdict";
 #define STORAGE_LAYOUT      1           // Bump to reset stored settings of all devices
 #define SESSION_DONE        0xFFFF      // Session position: device info sent, subscribe next
 #define NO_RECORD           (-1)
+#define RSSI_STEP_DB        3           // Signal level: moved by so much from the published one, see poll_rssi()
 
 _Static_assert(OD_MAX < OD_ID_RTC, "Session position overlaps predefined ids");
 
@@ -30,11 +32,17 @@ static struct {
     const char                 *device_type;
     const char                 *name_suffix;
     size_t                    (*phy1_addr)(uint8_t *buf, size_t max);
+    bool                      (*rssi)(int8_t *dbm);
     const od_provider_t *const *providers;
     size_t                      n_providers;
     od_entry_t                  list[OD_MAX];       // Dynamic objects
     uint16_t                    idx;                // Session / poll position (X13: idxUpdate)
     int                         reg_rec;            // Record waiting for REGACK
+    struct {                                        // Signal level
+        enum { RSSI_IDLE, RSSI_CHANGED, RSSI_PING } check;  // Read it: if it moved / anyway
+        bool                    sent;               // value published
+        int8_t                  value;
+    } rssi_pub;
 } s;
 
 ////////////////////////////////////////////////////////////////////////
@@ -153,6 +161,39 @@ static uint8_t write_in_mute(const od_subidx_t *sidx, uint8_t len, const uint8_t
     (void)sidx;
     (void)len;
     (void)buf;
+    return MQTTSN_RC_ACCEPTED;
+}
+
+// X13 objRSSI: the node sends it, the gateway does not write it. X13 RF nodes publish the level of every
+// message received; over WiFi that would be an answer to every message of the gateway. So the level is read
+// when a message of the gateway came (od_on_session_rx) and published after a ping, and on intensive exchange,
+// when there are no pings, if it moved by RSSI_STEP_DB; the first one at once.
+static bool poll_rssi(const od_subidx_t *sidx)
+{
+    (void)sidx;
+    int check = s.rssi_pub.check;
+    s.rssi_pub.check = RSSI_IDLE;
+
+    int8_t dbm;
+    if ((check == RSSI_IDLE) || !s.rssi(&dbm)) {
+        return false;
+    }
+    if ((check != RSSI_PING) && s.rssi_pub.sent && (abs(dbm - s.rssi_pub.value) < RSSI_STEP_DB)) {
+        return false;
+    }
+    s.rssi_pub.value = dbm;
+    s.rssi_pub.sent = true;
+    return true;
+}
+
+static uint8_t read_rssi(const od_subidx_t *sidx, uint8_t *len, uint8_t *buf)
+{
+    (void)sidx;
+    if (*len < 1) {
+        return MQTTSN_RC_REJ_NOT_SUPP;
+    }
+    buf[0] = (uint8_t)s.rssi_pub.value;
+    *len = 1;
     return MQTTSN_RC_ACCEPTED;
 }
 
@@ -389,6 +430,7 @@ esp_err_t od_init(const od_config_t *cfg)
     s.device_type = cfg->device_type;
     s.name_suffix = cfg->name_suffix;
     s.phy1_addr = cfg->phy1_addr;
+    s.rssi = cfg->rssi;
     s.providers = cfg->providers;
     s.n_providers = cfg->n_providers;
     s.reg_rec = NO_RECORD;
@@ -402,6 +444,18 @@ esp_err_t od_init(const od_config_t *cfg)
     for (size_t i = 0; i < s.n_providers; i++) {
         if (s.providers[i]->init != NULL) {
             s.providers[i]->init();
+        }
+    }
+
+    // Predefined objects the node sends itself are polled with the dynamic ones, they take a slot of the
+    // table (X13: the entries of listPredefOD with cbPoll, copied to ListOD)
+    if (s.rssi != NULL) {
+        static const od_subidx_t rssi_sidx = { OD_PLACE_USR_EXT, OD_TYPE_INT8, 0 };
+        od_entry_t *entry = od_add_object(&rssi_sidx);
+        if (entry != NULL) {
+            entry->topic_id = OD_ID_RSSI;
+            entry->read = read_rssi;
+            entry->poll = poll_rssi;
         }
     }
 
@@ -579,6 +633,16 @@ uint8_t od_on_publish(uint16_t topic_id, uint8_t flags, const uint8_t *data, siz
 
     uint8_t n = od_unpack(od_pack_width(&entry->sidx), buf, (uint8_t)len);
     return entry->write(&entry->sidx, n, buf);
+}
+
+// The link works, its level is read at the next poll (poll_rssi)
+void od_on_session_rx(uint8_t type)
+{
+    if (type == MQTTSN_PINGRESP) {
+        s.rssi_pub.check = RSSI_PING;
+    } else if (s.rssi_pub.check == RSSI_IDLE) {
+        s.rssi_pub.check = RSSI_CHANGED;
+    }
 }
 
 // Node name or "<declarer>_<address hex>" (X13: mqttsn_build_node_name)

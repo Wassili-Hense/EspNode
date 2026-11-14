@@ -57,7 +57,8 @@ extern "C" {
 #define OD_ID_GATE_ID           0xFF14  // UInt8, gateway address, 0xFF - search
 #define OD_ID_DEVICE_TYPE       0xFFC0  // String, read only
 #define OD_ID_PHY1_ADDR         0xFFC1  // Array, read only
-#define OD_ID_FREE_PINS         0xFFD8  // Array, read only: GPIOs free for the PLC program (plc provider)
+#define OD_ID_RSSI              0xFFC8  // Int8, sent only: signal level of the radio link to the gateway, dBm
+#define OD_ID_FREE_PINS        0xFFD8  // Array, read only: GPIOs free for the PLC program (plc provider)
 #define OD_ID_FREE_UARTS        0xFFD9  // UInt8, read only: UART ports free for the PLC program (plc provider)
 #define OD_ID_LOG_DEBUG         0xFFE0  // Array, sent only: a line of the node log (node_log), Debug ..
 #define OD_ID_LOG_ERROR         0xFFE3  // .. Error: 0xFFE0 + level
@@ -116,6 +117,8 @@ typedef struct {
     // Links where the node address is not the 1-byte X13 address (WiFi: IPv4), NULL for the X13 ones
     const char                 *name_suffix;    // Of the default name; NULL - the node address in hex
     size_t                    (*phy1_addr)(uint8_t *buf, size_t max);  // Object 0xFFC1; NULL - node address
+    // Radio link to the gateway (WiFi): the signal level now, dBm; false - not connected. NULL - no object 0xFFC8
+    bool                      (*rssi)(int8_t *dbm);
 } od_config_t;
 
 // Wall clock: local time the gateway writes to OD_ID_RTC (Enviriot: at connect and every hour).
@@ -147,6 +150,7 @@ void od_poll(void);
 uint8_t od_on_register(uint16_t topic_id, const uint8_t *name, size_t len);
 void    od_on_regack(uint16_t topic_id);
 uint8_t od_on_publish(uint16_t topic_id, uint8_t flags, const uint8_t *data, size_t len);
+void    od_on_session_rx(uint8_t type);
 size_t  od_get_client_id(uint8_t *buf);
 // X13 nodes use 1-byte addresses
 void    od_load_addrs(mqttsn_addr_t *node, mqttsn_addr_t *gateway);

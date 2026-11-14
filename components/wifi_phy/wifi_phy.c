@@ -191,3 +191,13 @@ const mqttsn_transport_t *wifi_phy_transport(void)
 {
     return &s_transport;
 }
+
+bool wifi_phy_rssi(int8_t *dbm)
+{
+    int rssi;
+    if (!s.has_ip || (esp_wifi_sta_get_rssi(&rssi) != ESP_OK)) {
+        return false;
+    }
+    *dbm = (int8_t)rssi;                // int8_t in the driver (wifi_ap_record_t.rssi)
+    return true;
+}
