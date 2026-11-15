@@ -21,8 +21,9 @@ enum {
     PLC_API_TODAY           = 10,   // int Today(): year % 100 << 24 | month << 16 | day << 8 | weekday
     PLC_API_UART_AVAIL      = 21,   // int UartBytesToRead(int port), as X13
     PLC_API_UART_GET        = 22,   // int UartGetByte(int port)
-    PLC_API_SEND_BYTE       = 23,   // bool SendByte(int stream, int data) = UartPutByte(int port, int data)
-    PLC_API_PRINT_F         = 26,   // bool PrintF(int stream, "format", values...): the stream, the format
+    PLC_API_SEND_BYTE       = 23,   // int SendByte(int stream, int data) = UartPutByte(int port, int data):
+                                    // the bytes still free in the stream, -1 - no room
+    PLC_API_PRINT_F         = 26,   // int PrintF(int stream, "format", values...), as SendByte: the stream, the format
                                     // address in the program, its length, the number of values, the values
     PLC_API_CONFIG_PIN      = 31,   // void ConfigPin(int pin, int mode, int option)
     PLC_API_TWI_BUS         = 39,   // 40-43: TWI functions 1-4 with the bus as the first argument

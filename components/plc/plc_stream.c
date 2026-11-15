@@ -43,7 +43,7 @@ static void end_line(int level)
 }
 
 // The bytes whole or nothing
-static plc_status_t put(uint32_t stream, const uint8_t *data, size_t len, uint32_t *ok)
+static plc_status_t put(uint32_t stream, const uint8_t *data, size_t len, uint32_t *left)
 {
     if (is_log(stream)) {
         int level = (int)(stream - PLC_STREAM_LOG);
@@ -52,7 +52,7 @@ static plc_status_t put(uint32_t stream, const uint8_t *data, size_t len, uint32
         for (size_t i = 0; i < len; i++) {
             line = (data[i] == 0) ? 0 : line + 1;
             if (line > LINE_MAX_LEN) {
-                *ok = 0;
+                *left = PLC_STREAM_NO_ROOM;
                 return PLC_RUN;
             }
         }
@@ -63,19 +63,21 @@ static plc_status_t put(uint32_t stream, const uint8_t *data, size_t len, uint32
                 s.line[level].text[s.line[level].len++] = (char)data[i];
             }
         }
-        *ok = 1;
+        *left = LINE_MAX_LEN - s.line[level].len;
         return PLC_RUN;
     }
 
     if (!plc_io_uart_ready(stream)) {
         return PLC_ERR_PARM;
     }
-    *ok = (s.uart[stream].count + len <= PLC_STREAM_UART_SIZE);
-    if (*ok) {
-        for (size_t i = 0; i < len; i++) {
-            s.uart[stream].buf[(s.uart[stream].head + s.uart[stream].count++) % PLC_STREAM_UART_SIZE] = data[i];
-        }
+    if (s.uart[stream].count + len > PLC_STREAM_UART_SIZE) {
+        *left = PLC_STREAM_NO_ROOM;
+        return PLC_RUN;
     }
+    for (size_t i = 0; i < len; i++) {
+        s.uart[stream].buf[(s.uart[stream].head + s.uart[stream].count++) % PLC_STREAM_UART_SIZE] = data[i];
+    }
+    *left = PLC_STREAM_UART_SIZE - s.uart[stream].count;
     return PLC_RUN;
 }
 
@@ -91,10 +93,10 @@ void plc_stream_reset(void)
     plc_stream_init(log);
 }
 
-plc_status_t plc_stream_byte(uint32_t stream, uint32_t value, uint32_t *ok)
+plc_status_t plc_stream_byte(uint32_t stream, uint32_t value, uint32_t *left)
 {
     uint8_t byte = (uint8_t)value;
-    return put(stream, &byte, 1, ok);
+    return put(stream, &byte, 1, left);
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -160,7 +162,7 @@ static void convert(out_t *o, char kind, char flag, int width, int prec, uint32_
 
 // The same rules as EP_PrintF.Arguments() of the compiler: a program from elsewhere stops instead of printing
 plc_status_t plc_stream_printf(uint32_t stream, const uint8_t *fmt, size_t len, uint32_t n, plc_stream_arg_t arg,
-                               uint32_t *ok)
+                               uint32_t *left)
 {
     if (!is_log(stream) && !plc_io_uart_ready(stream)) {
         return PLC_ERR_PARM;
@@ -214,10 +216,10 @@ plc_status_t plc_stream_printf(uint32_t stream, const uint8_t *fmt, size_t len, 
     }
 
     if (o.len > OUT_MAX) {
-        *ok = 0;
+        *left = PLC_STREAM_NO_ROOM;
         return PLC_RUN;
     }
-    return put(stream, o.buf, o.len, ok);
+    return put(stream, o.buf, o.len, left);
 }
 
 void plc_stream_flush(void)

@@ -706,7 +706,7 @@ static void test_program(void)
     CHECK(plc_vm_cycle() == PLC_ERR_PARM);
 
     // UART as X13: ram[0] = UartGetByte(2) on an empty buffer, ram[1] = UartBytesToRead(2),
-    // ram[2] = UartPutByte(2, 0x41)
+    // ram[2] = UartPutByte(2, 0x41): the bytes still free in the buffer of the port
     setup();
     {
         const uint8_t init[] = { LDI_0, LDI_U1, 26, LDI_U1, 4, API, 31,      // UART2_TX, UART2_RX
@@ -716,7 +716,7 @@ static void test_program(void)
         LOAD(init, cycle);
     }
     CHECK(plc_vm_cycle() == PLC_OK);
-    CHECK((plc_vm_cycle() == PLC_OK) && (ram[0] == 0xFFFFFFFF) && (ram[1] == 0) && (ram[2] == 1));
+    CHECK((plc_vm_cycle() == PLC_OK) && (ram[0] == 0xFFFFFFFF) && (ram[1] == 0) && (ram[2] == 255));
     CHECK(fake_uart_tx_len[2] == 0);                    // After the cycle, as X13
     plc_stream_flush();
     CHECK((fake_uart_tx_len[2] == 1) && (fake_uart_tx[2][0] == 0x41));
